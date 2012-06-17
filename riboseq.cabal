@@ -1,0 +1,23 @@
+Name:                riboseq
+Version:             0.0
+Cabal-Version:       >= 1.6
+License:             MIT
+Author:              Nick Ingolia
+Maintainer:          nick@ingolia.org
+Build-Type:          Simple
+Synopsis:            Analyze ribosome profiling data
+Homepage:            http://www.ingolia-lab.org/
+Category:            Bioinformatics
+
+Source-Repository head
+  type: git
+  location: http://github.com/ingolia/RiboSeq
+
+Executable rrna-stats
+  Main-is:             RrnaStats.hs
+  Other-modules:       Bio.RiboSeq.RrnaStats, Bio.RiboSeq.RrnaFrags
+  Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee,
+                       transformers, monads-tf, vector, unordered-containers,
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+  Hs-Source-Dirs:      src
+  Ghc-options:         -auto-all -O2 -Wall
