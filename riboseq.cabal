@@ -54,3 +54,12 @@ Executable wiggle-track
   Ghc-options:         -auto-all -Wall
   Default-Language:    Haskell2010
 
+Executable fp-transcript
+  Main-is:             FpTranscript.hs
+  Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting
+  Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, filepath,
+                       transformers, monads-tf, vector,
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+  Hs-Source-Dirs:      src
+  Ghc-options:         -auto-all -O2 -Wall
+  Default-Language:    Haskell2010
