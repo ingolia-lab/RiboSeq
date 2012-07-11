@@ -1,4 +1,4 @@
-module Bio.RiboSeq.CodonAssignment ( ASites, ASiteDelta, readASiteDelta, aSiteRange, aSiteDelta
+module Bio.RiboSeq.CodonAssignment ( ASites, ASiteDelta, readASiteDelta, aSiteRange, aSiteDelta, aSitePos
                                    , CodonFrame, cfCodon, cfFrame
                                    , ntOffsetToCodonFrame, codonFrameToNtOffset
                                    , ntCodonFrameFromStart, ntCodonFrameFromEnd

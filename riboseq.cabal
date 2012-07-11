@@ -1,6 +1,6 @@
 Name:                riboseq
 Version:             0.0
-Cabal-Version:       >= 1.6
+Cabal-Version:       >= 1.14
 License:             MIT
 Author:              Nick Ingolia
 Maintainer:          nick@ingolia.org
@@ -21,6 +21,7 @@ Library
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   GHC-Options:         -auto-all -Wall
+  Default-Language:    Haskell2010
 
 Executable rrna-stats
   Main-is:             RrnaStats.hs
@@ -30,6 +31,7 @@ Executable rrna-stats
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
+  Default-Language:    Haskell2010
 
 Executable fp-framing
   Main-Is:             FpFraming.hs
@@ -40,3 +42,15 @@ Executable fp-framing
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -Wall
+  Default-Language:    Haskell2010
+
+Executable wiggle-track
+  Main-Is:             WiggleTrack.hs
+  Other-Modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile
+  Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, filepath,
+                       transformers, monads-tf, vector, unordered-containers,
+                       seqloc >= 0.5.1, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+  Hs-Source-Dirs:      src
+  Ghc-options:         -auto-all -Wall
+  Default-Language:    Haskell2010
+

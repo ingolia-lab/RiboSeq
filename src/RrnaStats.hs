@@ -32,6 +32,7 @@ main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
                           hPutStr stderr $ usageInfo progline optDescrs
                           hPutStrLn stderr errs
 
+
 doRrnaStats :: FilePath -> Conf -> IO ()
 doRrnaStats bam conf = bracket (openInFile bam) Bam.closeInHandle $ \hin -> do
   statsio <- mkRrnaStatsIO (confMaxReadLen conf) (Bam.targetSeqList . Bam.inHeader $ hin)
