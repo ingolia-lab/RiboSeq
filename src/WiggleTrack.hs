@@ -16,47 +16,41 @@ import System.Environment
 import System.FilePath
 import System.IO
 
-import qualified Data.Attoparsec as AP (parseOnly)
 import qualified Data.Attoparsec.Char8 as AP
 import qualified Data.Iteratee as Iter
-import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Unboxed.Mutable as UM
 
 import qualified Bio.SamTools.Bam as Bam
 import qualified Bio.SamTools.BamIndex as BamIndex
 import qualified Bio.SamTools.Iteratee as BamIter
-import Bio.SeqLoc.LocRepr
 import qualified Bio.SeqLoc.Location as Loc
-import Bio.SeqLoc.OnSeq
 import qualified Bio.SeqLoc.Position as Pos
 import Bio.SeqLoc.Strand
-import Bio.SeqLoc.Transcript
 
-import Bio.RiboSeq.BamFile
 import Bio.RiboSeq.CodonAssignment
 
 main :: IO ()
 main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
-    where handleOpt (_,    _,         errs@(_:_)) = usage (unlines errs)
-          handleOpt (args, [],   []) = usage "Specify at least one BAM file"
-          handleOpt (args, bams, []) = either usage (doWiggleTrack bams) $ argsToConf args
+    where handleOpt (_,    _,       errs@(_:_)) = usage (unlines errs)
+          handleOpt (_,    [],      [])         = usage "Specify a BAM file"
+          handleOpt (args, [bam],   [])         = either usage (doWiggleTrack bam) $ argsToConf args
+          handleOpt (_,    (_:_:_), [])         = usage "Specify just one BAM file"
           usage errs = do prog <- getProgName
-                          let progline = prog ++ " [OPTIONS] <BAM> [<BAM> ...]"
+                          let progline = prog ++ " [OPTIONS] <BAM>"
                           hPutStr stderr $ usageInfo progline optDescrs
                           hPutStrLn stderr errs
 
-doWiggleTrack :: [FilePath] -> Conf -> IO ()
-doWiggleTrack bams@(bam0:_) conf = do 
-  tseqs <- Bam.withBamInFile bam0 $ return . Bam.targetSeqList . Bam.inHeader
+doWiggleTrack :: FilePath -> Conf -> IO ()
+doWiggleTrack bam conf = do 
+  tseqs <- Bam.withBamInFile bam $ return . Bam.targetSeqList . Bam.inHeader
   withFile (confOutputPlus conf) WriteMode $ \hfwd ->
     withFile (confOutputRev conf) WriteMode $ \hrev ->
     forM_ (sortBy (comparing Bam.len) tseqs) $ \tseq -> do
       ct@(Count name ctfwd ctrev) <- targetSeqCounts conf tseq
-      forM_ bams $ \bam ->
-        bracket (BamIndex.open bam) BamIndex.close $ \bidx -> do
-          verbose conf $ unwords [ "    counting ", show bam ]
-          countBam conf bidx ct
-          verbose conf $ unwords [ "    done counting ", show bam ]
+      bracket (BamIndex.open bam) BamIndex.close $ \bidx -> do
+        verbose conf $ unwords [ "    counting ", show bam ]
+        countBam conf bidx ct
+        verbose conf $ unwords [ "    done counting ", show bam ]
       verbose conf $ unwords ["  writing ", show $ confOutputPlus conf ]
       hPutWiggleChr hfwd conf name ctfwd
       verbose conf $ unwords ["  writing ", show $ confOutputRev conf ]      
