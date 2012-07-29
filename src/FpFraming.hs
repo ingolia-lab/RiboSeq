@@ -77,13 +77,13 @@ minLenFract :: Double
 minLenFract = 0.05
 
 startRange :: (Pos.Offset, Pos.Offset)
-startRange = (-20, -2)
+startRange = (-17, -8)
 
 startShift :: Pos.Offset
 startShift = 3
 
 endRange :: (Pos.Offset, Pos.Offset)
-endRange = (-25, -7)
+endRange = (-22, -13)
 
 endShift :: Pos.Offset
 endShift = -2
@@ -91,26 +91,34 @@ endShift = -2
 framingTable :: Framing -> Terminus -> Terminus -> String
 framingTable fr trstart trend = unlines . (header : ) . map framingLine $ wantedLength
   where wantedLength = filter ((> minLenFract) . lenFract fr) [(frminlen fr)..(frmaxlen fr)]
-        header = unfields [ "# Len", "Fract", "AtStart", "AtEnd", "Frame0", "Frame1", "Frame2", "ASite" ]
+        header = unfields [ "# Len", "Fract", "AtStart", "AtEnd", "Info", "Frame0", "Frame1", "Frame2", "ASite" ]
         framingLine len = unfields $ [ show len
                                      , showFFloat (Just 2) (lenFract fr len) ""
                                      , BS.unpack . repr $ startPeak
                                      , BS.unpack . repr $ endPeak
+                                     , showFFloat (Just 2) frameInfo ""
                                      ] ++ map showfr [0..2] ++ [ bestASite ]
           where startPeak = startShift + (negate $ terminusPeak startRange trstart len)
                 endPeak = endShift + (negate $ terminusPeak endRange trend len)
                 nfr f = (frprofile fr V.! (len - frminlen fr)) V.! f
+                frameInfo = logBase 2 3 - lengthFrameEntropy (nfr 0, nfr 1, nfr 2)
                 showfr f = showFFloat (Just 2) (fromIntegral (nfr f) / lenttl) ""
                 lenttl = (fromIntegral $ V.sum $ frprofile fr V.! (len - frminlen fr)) :: Double
                 startfr = fromIntegral $ (negate startPeak) `mod` 3
                 endfr = fromIntegral $ (negate endPeak) `mod` 3
                 bestfr = maximumBy (comparing nfr) [0..2]
                 bestASite | startPeak == endPeak && bestfr == startfr = BS.unpack . repr $ startPeak
-                          | startPeak == endPeak = (BS.unpack . repr $ startPeak) ++ "*"
-                          | startfr == bestfr = BS.unpack . repr $ startPeak
                           | endfr == bestfr = BS.unpack . repr $  endPeak
+                          | startfr == bestfr = BS.unpack . repr $ startPeak
+                          | startPeak == endPeak = (BS.unpack . repr $ startPeak) ++ "???"
                           | otherwise = "***"
 
+lengthFrameEntropy :: (Int, Int, Int) -> Double
+lengthFrameEntropy (n0, n1, n2) = negate . sum $ map nEntropy [n0, n1, n2] 
+  where nEntropy n = f * logBase 2 f
+          where f = (fromIntegral n) / total
+        total = fromIntegral $ n0 + n1 + n2
+        
 posLenTable :: Terminus -> String
 posLenTable tr = unlines $ header ++ proflines (profile tr)
   where header = [ unwords [ "# positions ", show . Pos.unOff .  before $ tr, show . Pos.unOff . after $ tr]
