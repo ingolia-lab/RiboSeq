@@ -48,10 +48,10 @@ doFpTranscript bam conf = do asites <- readASite $ confASite conf
                                doTranscript conf asites bidx trx
 
 doTranscript :: Conf -> ASites -> BamIndex.IdxHandle -> Transcript -> IO ()
-doTranscript conf asites bidx trx 
-  | confByLength conf  = doTranscriptByLength conf asites bidx trx
-  | confCdsCodons conf = doTranscriptCodon conf asites bidx trx 
-  | otherwise          = doTranscriptNt conf asites bidx trx
+doTranscript conf
+  | confByLength conf  = doTranscriptByLength conf
+  | confCdsCodons conf = doTranscriptCodon conf
+  | otherwise          = doTranscriptNt conf
                         
 doTranscriptByLength :: Conf -> ASites -> BamIndex.IdxHandle -> Transcript -> IO ()
 doTranscriptByLength conf asites bidx trx
@@ -119,11 +119,15 @@ ntLengthProfile trx msequ prof = (unlines headers, unlines body)
                 ntAt sequ = [ [BS.index sequ i] ]
 
 profileLocFields :: Transcript -> Int -> [String]
-profileLocFields trx i = [ show i, maybe "n/a" show cdsi
-                         , maybe "n/a" (show . cfCodon) framei, maybe "n/a" (show . cfFrame) framei
-                         ]
-  where cdsi = liftM ((i - ) . fromIntegral . fst . Loc.bounds) $ cds trx
-        framei = liftM (ntOffsetToCodonFrame . fromIntegral) cdsi
+profileLocFields trx i = [ show i ] ++ cdsFields
+  where cdsFields = maybe noCds yesCds $ cds trx
+        noCds = [ "n/a", "n/a", "n/a" ]
+        yesCds cdsloc = [ show cdsi
+                        , show . Pos.unOff . cfCodon $ cfr
+                        , show . Pos.unOff . cfFrame $ cfr
+                        ]
+          where cdsi = i - (fromIntegral . fst . Loc.bounds $ cdsloc)
+                cfr = ntOffsetToCodonFrame . fromIntegral $ cdsi
 
 junctionLocs :: Transcript -> String
 junctionLocs trx = unwords . map junctionLoc . junctions $ sploc
