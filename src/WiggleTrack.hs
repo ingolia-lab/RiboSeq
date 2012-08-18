@@ -43,6 +43,7 @@ main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
 doWiggleTrack :: FilePath -> Conf -> IO ()
 doWiggleTrack bam conf = do 
   tseqs <- Bam.withBamInFile bam $ return . Bam.targetSeqList . Bam.inHeader
+  maybe (return ()) (writeChrSizes tseqs) $ confChrSizes conf
   withFile (confOutputPlus conf) WriteMode $ \hfwd ->
     withFile (confOutputRev conf) WriteMode $ \hrev ->
     forM_ (sortBy (comparing Bam.len) tseqs) $ \tseq -> do
@@ -57,6 +58,14 @@ doWiggleTrack bam conf = do
       hPutWiggleChr hrev conf name ctrev
       verbose conf $ unwords ["  done writing ", show $ Bam.name tseq ]
                        
+writeChrSizes :: [Bam.HeaderSeq] -> FilePath -> IO ()
+writeChrSizes tseqs outname = withFile outname WriteMode $ \hout ->
+  let writeChrSizeLine hseq = hPutStrLn hout $ concat [ BS.unpack . Bam.name $ hseq
+                                                      , "\t"
+                                                      , show . Bam.len $ hseq
+                                                      ]
+  in mapM_ writeChrSizeLine tseqs
+
 data Count = Count { ctName :: !BS.ByteString, ctFwd :: !(UM.IOVector Int), ctRev:: !(UM.IOVector Int) }
     
 ctLength :: Count -> Int
@@ -107,6 +116,7 @@ hPutWiggleChr h conf name ctvec = putHeader >> putData
 data Conf = Conf { confOutput :: !(FilePath) 
                  , confASite :: !(Maybe FilePath)
                  , confQNorm :: !Double
+                 , confChrSizes :: !(Maybe FilePath)
                  } deriving (Show)
 
 confOutputPlus :: Conf -> FilePath
@@ -124,6 +134,7 @@ data Arg = ArgOutput { unArgOutput :: !String }
          | ArgASite { unArgASite :: !String }
          | ArgQNorm { unArgQNorm :: !String }
          | ArgCoverage
+         | ArgChrSizes { unArgChrSizes :: !String }
          deriving (Show, Read, Eq, Ord)
 
 argOutput :: Arg -> Maybe String
@@ -138,11 +149,16 @@ argQNorm :: Arg -> Maybe String
 argQNorm (ArgQNorm qNorm) = Just qNorm
 argQNorm _ = Nothing
 
+argChrSizes :: Arg -> Maybe String
+argChrSizes (ArgChrSizes chrSize) = Just chrSize
+argChrSizes _ = Nothing
+
 optDescrs :: [OptDescr Arg]
-optDescrs = [ Option ['o'] ["output"]     (ReqArg ArgOutput "OUTFILE")  "Output filename"
-            , Option ['a'] ["asite"]      (ReqArg ArgASite "ASITEFILE") "A site offsets filename"
-            , Option ['c'] ["coverage"]   (NoArg ArgCoverage)           "Total read coverage"
-            , Option ['q'] ["qnorm"]      (ReqArg ArgQNorm "QNORM")     "Multiplicative scaling factor"
+optDescrs = [ Option ['o'] ["output"]     (ReqArg ArgOutput "OUTFILE")    "Output filename"
+            , Option ['a'] ["asite"]      (ReqArg ArgASite "ASITEFILE")   "A site offsets filename"
+            , Option ['c'] ["coverage"]   (NoArg ArgCoverage)             "Total read coverage"
+            , Option ['q'] ["qnorm"]      (ReqArg ArgQNorm "QNORM")       "Multiplicative scaling factor"
+            , Option ['x'] ["chrsizes"]   (ReqArg ArgChrSizes "SIZEFILE") "Chromosome size output file"
             ]
 
 argsToConf :: [Arg] -> Either String Conf
@@ -150,7 +166,8 @@ argsToConf = runReaderT conf
     where conf = Conf <$> 
                  findOutput <*>
                  findASite <*>
-                 findQNorm
+                 findQNorm <*>
+                 findChrSizes
           findOutput = ReaderT $ maybe (Left "No out base") return  . listToMaybe . mapMaybe argOutput
           findASite = ReaderT $ \args ->
             let masites = listToMaybe . mapMaybe argASite $ args
@@ -159,3 +176,4 @@ argsToConf = runReaderT conf
                else maybe (Left "No A sites specified (and not coverage mode)") (return . Just) masites
           findQNorm = ReaderT $ maybe (return 1.0) parseDouble . listToMaybe . mapMaybe argQNorm
             where parseDouble = AP.parseOnly AP.double . BS.pack
+          findChrSizes = ReaderT $ return . listToMaybe . mapMaybe argChrSizes
