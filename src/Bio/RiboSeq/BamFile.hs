@@ -11,7 +11,6 @@ import Control.Monad
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.Iteratee as Iter
 import Data.List
-import Data.Maybe
 import System.IO
 
 import qualified Data.Vector as V
@@ -101,10 +100,13 @@ onReadContig trx mcloc = maybe (return ()) mcloc . (Bam.refSpLoc >=> trxReadCont
 -- 'Plus'-strand location on the transcript, or whose A site lies
 -- outside of the transcript, are ignored, i.e., 'return ()'
 onReadASite :: ASiteDelta -> Transcript -> (Bam.Bam1 -> Pos.Offset -> IO ()) -> Bam.Bam1 -> IO ()
-onReadASite asite trx mcloc bam = fromMaybe (handleMiss) countasite
-  where countasite = do off <- Bam.refSpLoc bam >>= trxReadASite asite trx
-                        return $! mcloc bam off -- verbose (reprStr off) >> mcloc bam off
-        handleMiss = return () -- verbose "miss"
+onReadASite asite trx mcloc bam = maybe doUnalign doAlign $! Bam.refSpLoc bam
+  where doUnalign = return ()
+        doAlign refloc = case trxReadASite asite trx refloc of
+          (ReadASite off) -> mcloc bam off
+          Incompatible -> return ()
+          Outside -> return ()
+          BadLength -> return ()
         _verbose str 
           = let (OnSeq _name tloc) = location trx
                 exttloc = Loc.extend extraBounds tloc

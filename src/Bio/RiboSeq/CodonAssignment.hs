@@ -6,7 +6,8 @@ module Bio.RiboSeq.CodonAssignment ( ASites, ASiteDelta
                                    , ntCodonFrameFromStart, ntCodonFrameFromEnd
                                    , profileFromStart, profileFromEnd
                                    , extraBounds
-                                   , trxReadContig, trxReadASite, cdsReadASite
+                                   , trxReadContig
+                                   , ReadASite(..), trxReadASite, cdsReadASite
                                    )
        where
 
@@ -155,6 +156,11 @@ trxReadContig trx loc = do bamiloc <- SpLoc.locInto loc exttloc
   where (OnSeq _name tloc) = location trx
         exttloc = Loc.extend extraBounds tloc
 
+data ReadASite = Incompatible
+               | BadLength
+               | Outside
+               | ReadASite !Pos.Offset
+                 
 -- | Determine the transcript location of the A site within a read.
 --
 -- The transcript location of the entire read is first determined by
@@ -164,13 +170,12 @@ trxReadContig trx loc = do bamiloc <- SpLoc.locInto loc exttloc
 -- If the A site itself does not lie within the transcript, then
 -- 'Nothing' is returned, though portions of the overall read can
 -- extend beyond the boundaries as described for 'trxReadContig'.
-trxReadASite :: ASiteDelta -> Transcript -> SpLoc.SpliceLoc -> Maybe Pos.Offset
-trxReadASite asite trx loc = do cloc <- trxReadContig trx loc
-                                pos <- aSitePos asite cloc
-                                case pos of
-                                  (Pos.Pos o Plus) 
-                                    | o >= 0 && o < Loc.length (unOnSeq . location $ trx) -> Just o
-                                  _ -> Nothing
+trxReadASite :: ASiteDelta -> Transcript -> SpLoc.SpliceLoc -> ReadASite
+trxReadASite asite trx = maybe Incompatible readContigASite . trxReadContig trx
+  where readContigASite = maybe BadLength validatePos . aSitePos asite
+        validatePos (Pos.Pos o Plus) 
+          | o >= 0 && o < Loc.length (unOnSeq . location $ trx) = ReadASite o
+        validatePos _ = Outside
 
 -- | Determine the CDS location of the A site within a read.
 -- 
@@ -178,7 +183,8 @@ trxReadASite asite trx loc = do cloc <- trxReadContig trx loc
 -- described in 'trxReadASite'. The transcript coordinate is then
 -- converted to a CDS coordinate. 'Nothing' is returned if the A site
 -- is outside of the CDS, or if the transcript has no annotated CDS.
-cdsReadASite :: ASiteDelta -> Transcript -> SpLoc.SpliceLoc -> Maybe Pos.Offset
-cdsReadASite asite trx loc = cds trx >>= \cdscloc ->
-  trxReadASite asite trx loc >>= \apos ->
-  liftM Pos.offset $! Loc.posInto (Pos.Pos apos Plus) cdscloc
+cdsReadASite :: ASiteDelta -> Transcript -> SpLoc.SpliceLoc -> ReadASite
+cdsReadASite asite trx loc = maybe Outside go $ cds trx
+  where go cdscloc = case trxReadASite asite trx loc of
+          (ReadASite trxoff) -> maybe Outside (ReadASite . Pos.offset) $! Loc.posInto (Pos.Pos trxoff Plus) cdscloc
+          trxasite -> trxasite
