@@ -30,6 +30,7 @@ import Bio.SeqLoc.Transcript
 import Bio.RiboSeq.BamFile
 import Bio.RiboSeq.CodonAssignment
 import Bio.RiboSeq.Counting
+import Bio.RiboSeq.Translation
 
 main :: IO ()
 main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
@@ -88,7 +89,7 @@ ntProfile trx msequ prof = (unlines headers, unlines body)
                 totalfield = show $ prof U.! i
                 maybeNt = maybe [] ntAt msequ
                 maybeAa = maybe [] aaAt msequ
-                  where aaAt sequ = [ indent $ maybe "x" show $ lookup (BS.take 3 $ BS.drop i sequ) trans_tbl ]
+                  where aaAt sequ = [ indent $ maybe "x" show $ ntToAaAt sequ i ]
                         indent = ((replicate (2 * (i `mod` 3)) ' ') ++)
                 ntAt sequ = [ [BS.index sequ i] ]
 
@@ -254,32 +255,3 @@ argsToConf = runReaderT conf
           findFastaArg = ReaderT $ return . listToMaybe . mapMaybe argFasta
           findInfoArg = ReaderT $ return . listToMaybe . mapMaybe argInfo
 
-data Amino = Ala | Arg | Asn | Asp | Cys | Gln | Glu | Gly
-           | His | Ile | Leu | Lys | Met | Phe | Pro | Ser
-           | Thr | Tyr | Trp | Val 
-           | STP
-     deriving (Show,Eq)
-              
-trans_tbl :: [(BS.ByteString,Amino)]
-trans_tbl = [("GCT",Ala),("GCC",Ala),("GCA",Ala),("GCG",Ala),
-             ("CGT",Arg),("CGC",Arg),("CGA",Arg),("CGG",Arg),("AGA",Arg),("AGG",Arg),
-             ("AAT",Asn),("AAC",Asn),
-             ("GAT",Asp),("GAC",Asp),
-             ("TGT",Cys),("TGC",Cys),
-             ("CAA",Gln),("CAG",Gln),
-             ("GAA",Glu),("GAG",Glu),
-             ("GGT",Gly),("GGC",Gly),("GGA",Gly),("GGG",Gly),
-             ("CAT",His),("CAC",His),
-             ("ATT",Ile),("ATC",Ile),("ATA",Ile),
-             ("TTA",Leu),("TTG",Leu),("CTT",Leu),("CTC",Leu),("CTA",Leu),("CTG",Leu),
-             ("AAA",Lys),("AAG",Lys),
-             ("ATG",Met),
-             ("TTT",Phe),("TTC",Phe),
-             ("CCT",Pro),("CCC",Pro),("CCA",Pro),("CCG",Pro),
-             ("TCT",Ser),("TCC",Ser),("TCA",Ser),("TCG",Ser),("AGT",Ser),("AGC",Ser),
-             ("ACT",Thr),("ACC",Thr),("ACA",Thr),("ACG",Thr),
-             ("TAT",Tyr),("TAC",Tyr),
-             ("TGG",Trp),
-             ("GTT",Val),("GTC",Val),("GTA",Val),("GTG",Val),
-             ("TAG",STP),("TGA",STP),("TAA",STP)
-            ]

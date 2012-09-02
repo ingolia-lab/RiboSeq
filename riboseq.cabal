@@ -56,7 +56,8 @@ Executable wiggle-track
 
 Executable fp-transcript
   Main-is:             FpTranscript.hs
-  Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting
+  Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting,
+                       Bio.RiboSeq.Translation
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, filepath,
                        transformers, monads-tf, vector,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
@@ -66,7 +67,8 @@ Executable fp-transcript
 
 Executable profile-distribution
   Main-is:             ProfileDistribution.hs
-  Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting
+  Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting,
+                       Bio.RiboSeq.Translation
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, filepath,
                        transformers, monads-tf, vector, statistics,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
