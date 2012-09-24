@@ -3,6 +3,12 @@ module Bio.RiboSeq.Translation
        where 
        
 import Data.ByteString.Char8 as BS       
+import qualified Data.List as L (find)
+
+inFrameStopIdx :: BS.ByteString -> Maybe Int
+inFrameStopIdx sequ = L.find isStop codonStarts
+  where isStop nt = ntToAaAt sequ nt == Just STP
+        codonStarts = [ 3*c | c <- [0..(BS.length sequ `div` 3)] ]
 
 ntToAaAt :: BS.ByteString -> Int -> Maybe Amino
 ntToAaAt sequ i | i < 0     = Nothing
