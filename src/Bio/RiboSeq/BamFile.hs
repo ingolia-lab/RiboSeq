@@ -4,6 +4,8 @@ module Bio.RiboSeq.BamFile
        , onReadContig, onReadASite
        , withCds
        , transcriptNtProfile, transcriptNtLengthProfile
+       , TrxProfile(..), trxProfileName, trxProfileStart
+       , TrxProfSet(..), trxProfSetName, trxProfSetStart, totalProfile
        )
        where
 
@@ -152,4 +154,22 @@ transcriptNtLengthProfile asites bidx trx =
         _n <- mapOverBams bidx count trx
         V.freeze ntcts >>= V.mapM freezeEnumCount
            
+data TrxProfile = TrxProfile !Transcript !(U.Vector Int)
+
+data TrxProfSet = TrxProfSet { transcript :: !Transcript, profiles :: ![U.Vector Int] }
+
+trxProfileName :: TrxProfile -> BS.ByteString
+trxProfileName (TrxProfile trx _prof) = unSeqLabel . geneId $ trx
+
+trxProfileStart :: TrxProfile -> Maybe Int
+trxProfileStart (TrxProfile trx _prof) = liftM (fromIntegral . Loc.offset5) . cds $ trx
+
+trxProfSetName :: TrxProfSet -> BS.ByteString
+trxProfSetName = unSeqLabel . geneId . transcript
+
+trxProfSetStart :: TrxProfSet -> Maybe Int
+trxProfSetStart = liftM (fromIntegral . Loc.offset5) . cds . transcript
+
+totalProfile :: TrxProfSet -> TrxProfile
+totalProfile (TrxProfSet trx profs) = TrxProfile trx (foldl1 (U.zipWith (+)) profs)
 

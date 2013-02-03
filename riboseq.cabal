@@ -112,3 +112,25 @@ Executable quant-windows
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
   Default-Language:    Haskell2010
+
+Executable train-harr-start
+  Main-Is:             TrainHarrStart.hs
+  Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting,
+                       Bio.RiboSeq.Translation, Bio.RiboSeq.SVMLight, Bio.RiboSeq.StartSVM
+  Build-depends:       base, bytestring, containers, attoparsec >= 0.8.5, filepath, process, unix, directory,
+                       transformers, monads-tf, vector, iteratee, conduit, MonadCatchIO-transformers, cmdtheline,
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+  Hs-Source-Dirs:      src
+  Ghc-options:         -auto-all -O2 -Wall
+  Default-Language:    Haskell2010  
+
+Executable test-harr-start
+  Main-Is:             TestHarrStart.hs
+  Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting,
+                       Bio.RiboSeq.Translation, Bio.RiboSeq.SVMLight, Bio.RiboSeq.StartSVM
+  Build-depends:       base, bytestring, containers, attoparsec >= 0.8.5, filepath, process, unix, directory,
+                       transformers, monads-tf, vector, iteratee, conduit, MonadCatchIO-transformers, cmdtheline,
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+  Hs-Source-Dirs:      src
+  Ghc-options:         -auto-all -O2 -Wall
+  Default-Language:    Haskell2010  
