@@ -48,12 +48,15 @@ doBamCount conf hidx hout =
   forM_ [0..(Bam.nTargets (BamIndex.idxHeader hidx) - 1)] $ \targetid ->
   let seqlen = Bam.targetSeqLen (BamIndex.idxHeader hidx) targetid
       winlen = fromIntegral $ confWindow conf
-      maxwin = seqlen `div` winlen
+      winstep = fromIntegral $ confWindowStep conf
+      maxwin = 1 + ((seqlen - winlen) `div` winstep)
   in do when (confVerbose conf) $ do
           BS.hPutStr stderr $ Bam.targetSeqName (BamIndex.idxHeader hidx) targetid
           hFlush stderr
         forM_ [0..maxwin] $ \win ->
-          targetWindow conf hidx targetid (win * winlen, min (seqlen - 1) ((win + 1) * winlen - 1)) >>= hPutStr hout
+          let winstart = (winstep * win)
+              winend = min (seqlen - 1) (winstart + winlen - 1)
+          in targetWindow conf hidx targetid (winstart, winend) >>= hPutStr hout
         when (confVerbose conf) $ hPutStrLn stderr $ "..." ++ show maxwin
      
 targetWindow :: Conf -> BamIndex.IdxHandle -> Int -> (Int64, Int64) -> IO String
@@ -147,9 +150,13 @@ main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
                                                
 data Conf = Conf { confBed :: !(Maybe FilePath)
                  , confWindow :: !Pos.Offset
+                 , confWindowStepM :: !(Maybe Pos.Offset)
                  , confWindowMin :: !Int
                  , confVerbose :: Bool
                  } deriving (Show)
+
+confWindowStep :: Conf -> Pos.Offset
+confWindowStep conf = fromMaybe (confWindow conf) $ confWindowStepM conf
 
 defaultWindow :: Pos.Offset
 defaultWindow = 1000
@@ -160,6 +167,7 @@ defaultWindowMin = 0
 data Arg = ArgBed { unArgBed :: !String }
          | ArgASite { unArgASite :: !String }
          | ArgWindow { unArgWindow :: !String }
+         | ArgWindowStep { unArgWindowStep :: !String }
          | ArgWindowMin { unArgWindowMin :: !String }
          | ArgVerbose
          deriving (Show, Read, Eq, Ord)
@@ -176,15 +184,20 @@ argWindow :: Arg -> Maybe String
 argWindow (ArgWindow win) = Just win
 argWindow _ = Nothing
 
+argWindowStep :: Arg -> Maybe String
+argWindowStep (ArgWindowStep wstep) = Just wstep
+argWindowStep _ = Nothing
+
 argWindowMin :: Arg -> Maybe String
 argWindowMin (ArgWindowMin wmin) = Just wmin
 argWindowMin _ = Nothing
 
 optDescrs :: [OptDescr Arg]
-optDescrs = [ Option ['b'] ["bed"]        (ReqArg ArgBed "BED")          "Bed filename"
-            , Option []    ["window"]     (ReqArg ArgWindow "WINDOW")    ("Window size [" ++ show (fromIntegral defaultWindow :: Int) ++ "]")
-            , Option []    ["window-min"] (ReqArg ArgWindowMin "MIN")    ("Minimum counts for reporting [" ++ show defaultWindowMin ++ "]")
-            , Option ['v'] ["verbose"]    (NoArg ArgVerbose)             "Verbose"
+optDescrs = [ Option ['b'] ["bed"]         (ReqArg ArgBed "BED")          "Bed filename"
+            , Option []    ["window"]      (ReqArg ArgWindow "WINDOW")    ("Window size [" ++ show (fromIntegral defaultWindow :: Int) ++ "]")
+            , Option []    ["window-step"] (ReqArg ArgWindowStep "STEP")  "Step between windows [WINDOW SIZE]"
+            , Option []    ["window-min"]  (ReqArg ArgWindowMin "MIN")    ("Minimum counts for reporting [" ++ show defaultWindowMin ++ "]")
+            , Option ['v'] ["verbose"]     (NoArg ArgVerbose)             "Verbose"
             ]
 
 argsToConf :: [Arg] -> Either String Conf
@@ -192,10 +205,12 @@ argsToConf = runReaderT conf
     where conf = Conf <$> 
                  findBed <*>
                  findWindow <*>
+                 findWindowStep <*>
                  findWindowMin <*>
                  ReaderT (return . elem ArgVerbose)
           findBed = ReaderT $ return . listToMaybe . mapMaybe argBed
           findWindow = ReaderT $ maybe (return defaultWindow) parseInt . listToMaybe . mapMaybe argWindow
+          findWindowStep = ReaderT $ maybe (return Nothing) (liftM Just . parseInt)  . listToMaybe . mapMaybe argWindowStep
           findWindowMin = ReaderT $ maybe (return defaultWindowMin) parseInt . listToMaybe . mapMaybe argWindowMin
           parseInt :: (Integral a) => String -> Either String a
           parseInt = AP.parseOnly AP.decimal . BS.pack
