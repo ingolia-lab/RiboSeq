@@ -6,6 +6,7 @@ import Control.Monad
 import qualified Data.ByteString.Char8 as BS
 import Data.Char (isSpace)
 import Data.List
+import Data.Monoid
 import Numeric
 import System.Exit
 import System.FilePath
@@ -180,6 +181,16 @@ data TestData a = TestData {  truePos, falsePos, trueNeg, falseNeg :: !a } deriv
 type TestCount = TestData Int
 type TestScore = TestData (U.Vector Double)
 
+instance Monoid a => Monoid (TestData a) where
+  mempty = TestData mempty mempty mempty mempty
+  (TestData tp1 fp1 tn1 fn1) `mappend` (TestData tp2 fp2 tn2 fn2) 
+    = TestData (tp1 `mappend` tp2) (fp1 `mappend` fp2) (tn1 `mappend` tn2) (fn1 `mappend` fn2)
+  mconcat tds = TestData { truePos = mconcat $ map truePos tds
+                         , falsePos = mconcat $ map falsePos tds
+                         , trueNeg = mconcat $ map trueNeg tds
+                         , falseNeg = mconcat $ map falseNeg tds
+                         }
+  
 negatives :: TestCount -> Int
 negatives tc = trueNeg tc + falsePos tc
 

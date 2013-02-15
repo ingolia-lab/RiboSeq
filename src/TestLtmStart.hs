@@ -32,12 +32,25 @@ main = run ( testLtmStart, info)
         test bed samps d output = do
           trxs <- Bed.readBedTranscripts bed
           hPutStrLn stderr $ "Read " ++ show (length trxs) ++ " testing transcripts"
-          withFile output WriteMode $ \hout ->
+          tsc <- testLtm defaultLtmModel samps defaultTrainPosns trxs
+          putStrLn $ "TrainPosns\t" ++ displayTestCount (countPartition tsc)
+          writeScore tsc output
+          when False $
+            withFile output WriteMode $ \hout ->
             forM_ trxs $ \trx -> do
               ltmp <- readLtmProfile trx samps
               let sc = ltmTestScore ltmp d
               putStrLn sc
               hPutStrLn hout sc
+
+writeScore :: TestScore -> FilePath -> IO ()
+writeScore tsc outname = do writeOne "tp" $ truePos tsc
+                            writeOne "fp" $ falsePos tsc
+                            writeOne "tn" $ trueNeg tsc
+                            writeOne "fn" $ falseNeg tsc
+  where writeOne categ = writeFile (base ++ "-" ++ categ ++ ext)
+                         . unlines . map (\x -> showFFloat (Just 4) x "") . U.toList
+        (base, ext) = splitExtension outname
 
 instance ArgVal HarrSample where
   converter = let (pairParser, pairPrinter) = pair ','

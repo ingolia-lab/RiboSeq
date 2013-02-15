@@ -35,13 +35,13 @@ data HarrModel = HarrModel { harrAaFields :: ![[Int]]
 
 readHarrProfiles :: HarrModel -> Transcript -> IO TrxProfSet
 readHarrProfiles harrModel trx = do profs <- mapM (readHarrProfile trx) . harrSamples $ harrModel
-                                    return $! TrxProfSet trx (map (\(TrxProfile _ prof) -> prof) profs)
+                                    return $! TrxProfSet trx (map (\(TrxVector _ prof) -> prof) profs)
 
 readHarrProfile :: Transcript -> HarrSample -> IO TrxProfile
 readHarrProfile trx (HarrSample bam asites) = do asd <- readASiteDelta asites
                                                  prof <- BamIndex.withIndex bam $ \hidx -> 
                                                    transcriptNtProfile asd hidx trx
-                                                 return $! TrxProfile trx prof
+                                                 return $! TrxVector trx prof
 
 defaultHarrAaFields :: [[Int]]
 defaultHarrAaFields = [[-2, -1], [0], [1], [2], [3, 4], [5, 6, 7], [8, 9, 10], [11, 12, 13]]
