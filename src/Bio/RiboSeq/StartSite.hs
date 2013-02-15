@@ -30,9 +30,9 @@ data LtmModel = LtmModel { ltmMinReads :: !Int
                          } deriving (Read, Show)
 
 defaultLtmModel :: LtmModel
-defaultLtmModel = LtmModel { ltmMinReads = 10
-                           , ltmMinDiff = 5.0
-                           , ltmMinRatio = 2.0
+defaultLtmModel = LtmModel { ltmMinReads = 9
+                           , ltmMinDiff = 9.0
+                           , ltmMinRatio = 3.0
                            }
 
 data StartModel = StartModel { harrModel :: !HarrModel
@@ -74,7 +74,7 @@ ltmIsStart :: LtmModel -> TrxLtmProf -> Int -> Bool
 ltmIsStart model (TrxLtmProf (TrxVector trx ltm) (TrxVector _ chx)) st
   | st + 4 >= U.length ltm = False
   | otherwise = let ltmc = fromIntegral . U.sum . U.take 3 . U.drop (st + 2) $ ltm
-                    chxc = fromIntegral . U.sum . U.take 3 . U.drop (st + 2) $ ltm
+                    chxc = fromIntegral . U.sum . U.take 3 . U.drop (st + 2) $ chx
                     ltmttl = fromIntegral . U.sum $ ltm
                     chxttl = fromIntegral . U.sum $ chx
                     expc = chxc * ltmttl / chxttl
@@ -88,7 +88,7 @@ ltmStartRatio :: TrxLtmProf -> Int -> Double
 ltmStartRatio (TrxLtmProf (TrxVector trx ltm) (TrxVector _ chx)) st
   | st + 4 >= U.length ltm = 0.0
   | otherwise = let ltmc = fromIntegral . U.sum . U.take 3 . U.drop (st + 2) $ ltm
-                    chxc = fromIntegral . U.sum . U.take 3 . U.drop (st + 2) $ ltm
+                    chxc = fromIntegral . U.sum . U.take 3 . U.drop (st + 2) $ chx
                     ltmttl = fromIntegral . U.sum $ ltm
                     chxttl = fromIntegral . U.sum $ chx
                     expc = chxc * ltmttl / chxttl
