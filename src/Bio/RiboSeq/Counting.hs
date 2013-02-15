@@ -12,6 +12,9 @@ data EnumCountBase v e = EnumCount { ecLB :: !e, ecUB :: !e, ecCount :: v }
 type EnumCountIO e = EnumCountBase (UM.IOVector Int) e
 type EnumCount e = EnumCountBase (U.Vector Int) e
 
+type EnumXountIO e = EnumCountBase (UM.IOVector Double) e
+type EnumXount e = EnumCountBase (U.Vector Double) e
+
 newEnumCountIO :: (Enum e) => (e, e) -> IO (EnumCountIO e)
 newEnumCountIO (lb, ub) = EnumCount lb ub <$> UM.replicate (1 + fromEnum ub - fromEnum lb) 0
 
@@ -59,6 +62,29 @@ indexEnumCount (EnumCount lb _ub ct) e | idx >= 0 && idx < U.length ct = ct U.! 
         
 enumCountTotal :: EnumCount e -> Int
 enumCountTotal (EnumCount _lb _ub ct) = U.sum ct
+
+newEnumXountIO :: (Enum e) => (e, e) -> IO (EnumXountIO e)
+newEnumXountIO (lb, ub) = EnumCount lb ub <$> UM.replicate (1 + fromEnum ub - fromEnum lb) 0.0
+
+xountEnum :: (Show e, Enum e) => EnumXountIO e -> e -> Double -> IO ()
+xountEnum (EnumCount lb _ub ct) e x | idx >= 0 && idx < UM.length ct = incr
+                                    | otherwise = ioError . userError . unwords $
+                                                  [ "xountEnum: out of bounds: "
+                                                  , show idx, show e
+                                                  ]
+  where idx = fromEnum e - fromEnum lb
+        incr = UM.read ct idx >>= UM.write ct idx . ((+ x) $!)
+
+freezeEnumXount :: EnumXountIO e -> IO (EnumXount e)
+freezeEnumXount (EnumCount lb ub ctio) = EnumCount lb ub <$> U.freeze ctio
+
+readEnumXount :: (Show e, Enum e) => EnumXountIO e -> e -> IO Double
+readEnumXount (EnumCount lb _ub ct) e | idx >= 0 && idx < UM.length ct = UM.read ct idx
+                                      | otherwise = ioError . userError . unwords $
+                                                    [ "readEnumXount: out of bounds: "
+                                                    , show idx, show e
+                                                    ]
+  where idx = fromEnum e - fromEnum lb
 
 newtype ProfileEnumCountBase v e = ProfileEnumCount { pecProf :: (V.Vector (EnumCountBase v e)) }
 type ProfileEnumCountIO e = ProfileEnumCountBase (UM.IOVector Int) e

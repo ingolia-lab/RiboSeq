@@ -4,7 +4,7 @@ module Bio.RiboSeq.BamFile
        , onReadContig, onReadASite
        , withCds
        , transcriptNtProfile, transcriptNtLengthProfile
-       , TrxProfile(..), trxProfileName, trxProfileStart
+       , TrxVector(..), TrxProfile, trxVectorTrx, trxVectorV, trxVectorName, trxVectorStart, trxVectorLength
        , TrxProfSet(..), trxProfSetName, trxProfSetStart, totalProfile
        )
        where
@@ -154,15 +154,26 @@ transcriptNtLengthProfile asites bidx trx =
         _n <- mapOverBams bidx count trx
         V.freeze ntcts >>= V.mapM freezeEnumCount
            
-data TrxProfile = TrxProfile !Transcript !(U.Vector Int)
+data TrxVector a = TrxVector !Transcript !(U.Vector a)
+
+type TrxProfile = TrxVector Int
 
 data TrxProfSet = TrxProfSet { transcript :: !Transcript, profiles :: ![U.Vector Int] }
 
-trxProfileName :: TrxProfile -> BS.ByteString
-trxProfileName (TrxProfile trx _prof) = unSeqLabel . geneId $ trx
+trxVectorTrx :: TrxVector a -> Transcript
+trxVectorTrx (TrxVector trx _prof) = trx
 
-trxProfileStart :: TrxProfile -> Maybe Int
-trxProfileStart (TrxProfile trx _prof) = liftM (fromIntegral . Loc.offset5) . cds $ trx
+trxVectorV :: TrxVector a -> U.Vector a
+trxVectorV (TrxVector _trx prof) = prof
+
+trxVectorName :: TrxVector a -> BS.ByteString
+trxVectorName (TrxVector trx _prof) = unSeqLabel . geneId $ trx
+
+trxVectorStart :: TrxVector a -> Maybe Int
+trxVectorStart (TrxVector trx _prof) = liftM (fromIntegral . Loc.offset5) . cds $ trx
+
+trxVectorLength :: (U.Unbox a) => TrxVector a -> Int
+trxVectorLength (TrxVector _trx prof) = U.length prof
 
 trxProfSetName :: TrxProfSet -> BS.ByteString
 trxProfSetName = unSeqLabel . geneId . transcript
@@ -171,5 +182,5 @@ trxProfSetStart :: TrxProfSet -> Maybe Int
 trxProfSetStart = liftM (fromIntegral . Loc.offset5) . cds . transcript
 
 totalProfile :: TrxProfSet -> TrxProfile
-totalProfile (TrxProfSet trx profs) = TrxProfile trx (foldl1 (U.zipWith (+)) profs)
+totalProfile (TrxProfSet trx profs) = TrxVector trx (foldl1 (U.zipWith (+)) profs)
 

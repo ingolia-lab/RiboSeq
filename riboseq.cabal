@@ -113,6 +113,16 @@ Executable quant-windows
   Ghc-options:         -auto-all -O2 -Wall
   Default-Language:    Haskell2010
 
+Executable fp-count
+  Main-Is:             FpCount.hs
+  Other-modules:       
+  Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, filepath,
+                       transformers, monads-tf, vector, unordered-containers, statistics,
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+  Hs-Source-Dirs:      src
+  Ghc-options:         -auto-all -O2 -Wall
+  Default-Language:    Haskell2010
+
 Executable train-harr-start
   Main-Is:             TrainHarrStart.hs
   Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting,
