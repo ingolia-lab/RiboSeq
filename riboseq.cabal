@@ -148,7 +148,8 @@ Executable test-harr-start
 Executable test-ltm-start
   Main-Is:             TestLtmStart.hs
   Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting,
-                       Bio.RiboSeq.Translation
+                       Bio.RiboSeq.Translation, Bio.RiboSeq.SVMLight, Bio.RiboSeq.StartSVM,
+                       Bio.RiboSeq.StartLTM
   Build-depends:       base, bytestring, containers, attoparsec >= 0.8.5, filepath, process, unix, directory,
                        transformers, monads-tf, vector, iteratee, conduit, MonadCatchIO-transformers, cmdtheline,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee

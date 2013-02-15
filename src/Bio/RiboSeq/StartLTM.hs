@@ -1,4 +1,4 @@
-module Bio.RiboSeq.StartSite
+module Bio.RiboSeq.StartLTM
        where
 
 import Control.Arrow
@@ -30,9 +30,9 @@ data LtmModel = LtmModel { ltmMinReads :: !Int
                          } deriving (Read, Show)
 
 defaultLtmModel :: LtmModel
-defaultLtmModel = LtmModel { ltmMinReads = 9
-                           , ltmMinDiff = 9.0
-                           , ltmMinRatio = 3.0
+defaultLtmModel = LtmModel { ltmMinReads = 4
+                           , ltmMinDiff = 0.0
+                           , ltmMinRatio = 2.0
                            }
 
 data StartModel = StartModel { harrModel :: !HarrModel

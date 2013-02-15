@@ -20,7 +20,7 @@ import qualified Bio.SeqLoc.Bed as Bed
 import Bio.RiboSeq.BamFile
 import Bio.RiboSeq.SVMLight
 import Bio.RiboSeq.StartSVM
-import Bio.RiboSeq.StartSite
+import Bio.RiboSeq.StartLTM
 
 main :: IO ()
 main = run ( testLtmStart, info)
@@ -28,11 +28,13 @@ main = run ( testLtmStart, info)
                      , version = "0.0"
                      , termDoc = "Testing start site prediction"
                      }
-        testLtmStart = test <$> bedfile <*> ltmsamples <*> offset <*> outputfile
-        test bed samps d output = do
+        testLtmStart = test <$> cmdmodel <*> bedfile <*> ltmsamples <*> offset <*> outputfile
+        test ltmmod bed samps d output = do
           trxs <- Bed.readBedTranscripts bed
           hPutStrLn stderr $ "Read " ++ show (length trxs) ++ " testing transcripts"
-          tsc <- testLtm defaultLtmModel samps defaultTrainPosns trxs
+          tsc <- testLtm ltmmod samps defaultTrainPosns trxs
+          putStr $ concat [ show . ltmMinReads $ ltmmod, "\t", showFFloat (Just 1) (ltmMinDiff ltmmod) "", "\t"
+                          , showFFloat (Just 1) (ltmMinRatio ltmmod) "", "\t" ]                            
           putStrLn $ "TrainPosns\t" ++ displayTestCount (countPartition tsc)
           writeScore tsc output
           when False $
@@ -74,3 +76,12 @@ offset = required $ defaultOpt (Just 0) Nothing $ (optInfo [ "d", "offset" ])
 outputfile :: Term String
 outputfile = required $ opt Nothing $ (optInfo [ "o", "output" ])
   { optName = "OUTPUT-BASE", optDoc = "Base filename for outputs" }
+
+cmdmodel :: Term LtmModel          
+cmdmodel = LtmModel <$> cmdMinReads <*> cmdMinDiff <*> cmdMinRatio
+  where cmdMinReads = required $ defaultOpt (Just . ltmMinReads $ defaultLtmModel) Nothing $ 
+                      (optInfo [ "min-reads" ]) { optName = "MIN-READS", optDoc = "Mininum LTM read count at start" }
+        cmdMinDiff  = required $ defaultOpt (Just . ltmMinDiff  $ defaultLtmModel) Nothing $
+                      (optInfo [ "min-diff"  ]) { optName = "MIN-DIFF",  optDoc = "Minimum LTM - expected at start" }
+        cmdMinRatio = required $ defaultOpt (Just . ltmMinRatio $ defaultLtmModel)  Nothing $
+                      (optInfo [ "min-ratio" ]) { optName = "MIN-RATIO", optDoc = "Minimum LTM / expected at start" }
