@@ -4,8 +4,6 @@ module Main
   where
 
 import Control.Applicative
-import Numeric
-import System.Console.GetOpt
 import System.Exit
 import System.FilePath
 import System.IO
@@ -22,11 +20,11 @@ main = run ( trainHarrStart, info)
                      , version = "0.0"
                      , termDoc = "Training start site prediction"
                      }
-        trainHarrStart = train <$> binary <*> harrModel <*> bedfile <*> model
-        train bin harrmod bed modfile = do
+        trainHarrStart = train <$> harrModel <*> bedfile <*> model
+        train harrmod bed modfile = do
           trxs <- Bed.readBedTranscripts bed
           hPutStrLn stderr $ "Read " ++ show (length trxs) ++ " training transcripts"
-          err <- trainHarr bin harrmod defaultTrainPosns trxs
+          err <- trainHarr harrmod defaultTrainPosns trxs
           case err of 
             ExitFailure _ -> hPutStrLn stderr $ "*** SVM training failed"
             ExitSuccess -> do writeFile modfile $ show harrmod
@@ -46,7 +44,8 @@ harrModel = HarrModel <$>
             pure defaultHarrAaFields <*>
             samples <*>
             (modelSvmFile <$> model) <*>
-            mintotal
+            mintotal <*>
+            binary
 
 model :: Term String
 model = required $ opt Nothing $ (optInfo [ "m", "model" ])
@@ -66,5 +65,5 @@ binary = required $ opt Nothing $ (optInfo [ "b", "binary" ])
 
 mintotal :: Term Int
 mintotal = value $ opt 50 $ (optInfo [ "z", "min-total" ])
-  { optName = "MIN-COUNT", optDoc = "Minimum total reads on scored position" }
+  { optName = "MIN-COUNT", optDoc = "Minimum total reads on scored positions" }
            

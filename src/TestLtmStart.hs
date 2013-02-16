@@ -79,9 +79,9 @@ outputfile = required $ opt Nothing $ (optInfo [ "o", "output" ])
 
 cmdmodel :: Term LtmModel          
 cmdmodel = LtmModel <$> cmdMinReads <*> cmdMinDiff <*> cmdMinRatio
-  where cmdMinReads = required $ defaultOpt (Just . ltmMinReads $ defaultLtmModel) Nothing $ 
+  where cmdMinReads = value $ opt (ltmMinReads defaultLtmModel) $ 
                       (optInfo [ "min-reads" ]) { optName = "MIN-READS", optDoc = "Mininum LTM read count at start" }
-        cmdMinDiff  = required $ defaultOpt (Just . ltmMinDiff  $ defaultLtmModel) Nothing $
+        cmdMinDiff  = value $ opt (ltmMinDiff  defaultLtmModel) $
                       (optInfo [ "min-diff"  ]) { optName = "MIN-DIFF",  optDoc = "Minimum LTM - expected at start" }
-        cmdMinRatio = required $ defaultOpt (Just . ltmMinRatio $ defaultLtmModel)  Nothing $
+        cmdMinRatio = value $ opt (ltmMinRatio defaultLtmModel) $
                       (optInfo [ "min-ratio" ]) { optName = "MIN-RATIO", optDoc = "Minimum LTM / expected at start" }

@@ -24,8 +24,8 @@ main = run ( testHarrStart, info)
                      , version = "0.0"
                      , termDoc = "Testing start site prediction"
                      }
-        testHarrStart = test <$> binary <*> modelfile <*> bedfile <*> scorefile
-        test bin modfile bed mscore = do
+        testHarrStart = test <$> modelfile <*> bedfile <*> scorefile
+        test modfile bed mscore = do
           modelstr <- readFile modfile
           model <- case reads modelstr of
             [(m, "")] -> return m
@@ -33,7 +33,7 @@ main = run ( testHarrStart, info)
                     exitFailure
           trxs <- Bed.readBedTranscripts bed
           hPutStrLn stderr $ "Read " ++ show (length trxs) ++ " testing transcripts"
-          tsc <- testHarr bin model defaultTrainPosns trxs
+          tsc <- testHarr model defaultTrainPosns trxs
           putStrLn $ "TrainPosns\t" ++ displayTestCount (countPartition tsc)
           maybe (return ()) (writeScore tsc) mscore
 
@@ -59,10 +59,6 @@ modelfile = required $ opt Nothing $ (optInfo [ "m", "model" ])
 bedfile :: Term String
 bedfile = required $ opt Nothing $ (optInfo [ "t", "transcripts" ])
   { optName = "BED", optDoc = "Bed-format annotation filename for testing genes" }
-
-binary :: Term String
-binary = required $ opt Nothing $ (optInfo [ "b", "binary" ])
-  { optName = "/PATH/TO/SVM", optDoc = "Path of directory containing SVMlight binaries" }
 
 scorefile :: Term (Maybe String)
 scorefile = value $ opt Nothing $ (optInfo [ "o", "output" ])

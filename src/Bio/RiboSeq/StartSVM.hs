@@ -31,6 +31,7 @@ data HarrModel = HarrModel { harrAaFields :: ![[Int]]
                            , harrSamples :: ![HarrSample]
                            , harrSvmModel :: !FilePath
                            , harrMinTotal :: !Int
+                           , harrBinDir :: !FilePath
                            } deriving (Read, Show)
 
 readHarrProfiles :: HarrModel -> Transcript -> IO TrxProfSet
@@ -46,9 +47,9 @@ readHarrProfile trx (HarrSample bam asites) = do asd <- readASiteDelta asites
 defaultHarrAaFields :: [[Int]]
 defaultHarrAaFields = [[-2, -1], [0], [1], [2], [3, 4], [5, 6, 7], [8, 9, 10], [11, 12, 13]]
 
-trainHarr :: FilePath -> HarrModel -> TrainPosns -> [Transcript] -> IO ExitCode
-trainHarr svmlearn model posns trxset = trainSVM learn fields posns (harrMinTotal model) trxsrc
-  where learn = defaultLearn { learnBinary = svmlearn
+trainHarr :: HarrModel -> TrainPosns -> [Transcript] -> IO ExitCode
+trainHarr model posns trxset = trainSVM learn fields posns (harrMinTotal model) trxsrc
+  where learn = defaultLearn { learnBinary = harrBinDir model </> "svm_learn"
                              , modelOut = harrSvmModel model
                              , softMargin = Just 2.0
                              , positiveWeight = Just 4.0
@@ -58,19 +59,28 @@ trainHarr svmlearn model posns trxset = trainSVM learn fields posns (harrMinTota
         fields = aaSvmFields . harrAaFields $ model
         trxsrc = C.sourceList trxset C.$= C.mapM (readHarrProfiles model)
 
-testHarr :: FilePath -> HarrModel -> TrainPosns -> [Transcript] -> IO TestScore
-testHarr svmclassify model posns trxset = testSVM classify fields posns (harrMinTotal model) trxsrc
-  where classify = defaultClassify { classifyBinary = svmclassify
+testHarr :: HarrModel -> TrainPosns -> [Transcript] -> IO TestScore
+testHarr model posns trxset = testSVM classify fields posns (harrMinTotal model) trxsrc
+  where classify = defaultClassify { classifyBinary = harrBinDir model </> "svm_classify"
                                    , modelIn = harrSvmModel model
                                    }
         fields = aaSvmFields . harrAaFields $ model
         trxsrc = C.sourceList trxset C.$= C.mapM (readHarrProfiles model)
 
-scoreProfile :: RunSVMClassify -> SVMFields -> TrxProfSet -> FilePath -> IO (U.Vector Double)
-scoreProfile classify fields profset scoredir
+svmStartProfile :: HarrModel -> Transcript -> IO (U.Vector Bool)
+svmStartProfile model trx = do profset <- readHarrProfiles model trx
+                               scoreprof <- scoreProfile classify fields (harrMinTotal model) profset "."
+                               return $! U.map (> 0.0) scoreprof
+  where classify = defaultClassify { classifyBinary = harrBinDir model </> "svm_classify"
+                                   , modelIn = harrSvmModel model
+                                   }
+        fields = aaSvmFields . harrAaFields $ model
+
+scoreProfile :: RunSVMClassify -> SVMFields -> Int -> TrxProfSet -> FilePath -> IO (U.Vector Double)
+scoreProfile classify fields mintotal profset scoredir
     = withTempFileName (scoredir </> "query") $ \query ->
       withTempFileName (scoredir </> "score") $ \rawscore -> do
-        BS.writeFile query . BS.unlines $ profileQuerySet fields profset
+        BS.writeFile query . BS.unlines $ profileQuerySet fields mintotal profset
         err <- runSVMClassify $ classify { queriesIn = query, decisionsOut = rawscore }
         case err of
           ExitSuccess -> readScoreVector query rawscore
@@ -93,10 +103,10 @@ scoreProfile classify fields profset scoredir
         isComment = maybe blankQuery ((== '#') . fst) . BS.uncons
         blankQuery = error $ "scoreProfileNew: blank query"
                 
-profileQuerySet :: SVMFields -> TrxProfSet -> [BS.ByteString]
-profileQuerySet fields profset = map exampleAt posns
+profileQuerySet :: SVMFields -> Int -> TrxProfSet -> [BS.ByteString]
+profileQuerySet fields mintotal profset = map exampleAt posns
   where posns = [0..(fromIntegral . Loc.length . unOnSeq . location . transcript $ profset)]
-        exampleAt p = fromMaybe justInfo . profilesExample fields 0 targetQuery profset $ p
+        exampleAt p = fromMaybe justInfo . profilesExample fields mintotal targetQuery profset $ p
           where justInfo = '#' `BS.cons` profilesInfo fields profset p
 
 trainSVM :: RunSVMLearn -> SVMFields -> TrainPosns -> Int -> C.Source IO TrxProfSet -> IO ExitCode
@@ -195,7 +205,7 @@ normalize zs | total == 0 = replicate (length zs) 0.0
           norm = (/ (sqrt . fromIntegral $ total)) . fromIntegral
 
 keepTemp :: Bool
-keepTemp = True
+keepTemp = False
 
 withTempFile :: FilePath -> ((FilePath, Handle) -> IO a) -> IO a
 withTempFile tmpbase = bracket (mkstemp tmpnam) closeAndRemove 
