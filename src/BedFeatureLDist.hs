@@ -51,7 +51,7 @@ main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
 doLengthDist :: FilePath -> Conf -> IO ()
 doLengthDist bamfile conf = do maybe (return ()) doDist $ confDistOut conf
                                maybe (return ()) doCompare $ confCompare conf
-  where doDist distout = (maybe countAllReads countBedReads $ confBedFile conf) bamfile >>= 
+  where doDist distout = (maybe (liftM lpFlatten . countAllReads) countBedReads $ confBedFile conf) bamfile >>= 
                          writeFile distout . countTable
         doCompare (cfin, cfout) = do 
           cf <- liftM parseCountTable $ BS.readFile cfin
@@ -63,9 +63,8 @@ doLengthDist bamfile conf = do maybe (return ()) doDist $ confDistOut conf
                                 in do lp <- countTrxReads hidx trx
                                       hPutStrLn hout $ compareLine cf name lp
           in IterIO.fileDriver cfIter bed
-        doCompareBam _cf _cfout = undefined
---        doCompareBam cf cfout = do ct <- countAllReads bamfile
---                                   writeFile cfout $ unlines [ compareLine cf bamfile ct ]
+        doCompareBam cf cfout = do lp <- countAllReads bamfile
+                                   writeFile cfout $ unlines [ compareLine cf bamfile lp ]
 
 compareLine :: U.Vector Int -> String -> LenProf -> String
 compareLine cf trx lp = intercalate "\t" [ trx
@@ -92,13 +91,26 @@ compareLine cf trx lp = intercalate "\t" [ trx
         winsScore = distribL1 cfdist wdist
         winsRatio = winsTotal / (fromIntegral $ lpTotal lp)
 
-countAllReads :: FilePath -> IO (U.Vector Int)
-countAllReads bamfile = do ct <- newCount
-                           IterLL.run $ IterLL.joinIM $ BamIter.enumBam bamfile $ countAll ct
-                           U.freeze ct
-  where countAll ct = IterLL.mapM_ $ \bam -> case Bam.refSpLoc bam of
-          Just loc -> countOne ct (fromIntegral $ Loc.length loc)
+countAllReads :: FilePath -> IO LenProf
+countAllReads bamfile = BamIdx.withIndex bamfile $ \hidx -> do
+  lprofs <- forM [0..((Bam.nTargets . BamIdx.idxHeader $ hidx) - 1)] $ \tid -> do
+    let hseq = Bam.targetSeq (BamIdx.idxHeader hidx) tid
+    when verbose $ hPutStrLn stderr . unwords $ [ "Running", show . Bam.name $ hseq ]
+    lprof <- newLenProf (fromIntegral . Bam.len $ hseq)
+    let countReads = IterLL.mapM_ $ \bam -> case Bam.refSpLoc bam of
+          Just loc -> countOne' lprof (fst $ Loc.bounds loc) (fromIntegral $ Loc.length loc)
           Nothing -> return ()
+        readIter = IterLL.joinIM $ BamIter.enumIndexRegion hidx tid (0, Bam.len hseq - 1) countReads
+    IterLL.run readIter
+    lpFreeze lprof
+  return $! foldl' lpAppend (LenProf V.empty) lprofs
+
+-- countAllReads bamfile = do ct <- newCount
+--                            IterLL.run $ IterLL.joinIM $ BamIter.enumBam bamfile $ countAll ct
+--                            U.freeze ct
+--   where countAll ct = IterLL.mapM_ $ \bam -> case Bam.refSpLoc bam of
+--           Just loc -> countOne ct (fromIntegral $ Loc.length loc)
+--           Nothing -> return ()
 
 countBedReads :: FilePath -> FilePath -> IO (U.Vector Int)
 countBedReads bedfile bamfile = BamIdx.withIndex bamfile $ \hidx -> 
@@ -203,6 +215,9 @@ newLenProf l = liftIO . liftM LenProf . V.replicateM l . UM.replicate (initlen +
 
 lpFreeze :: (MonadIO m) => LenProfIO -> m LenProf
 lpFreeze = liftM LenProf . liftIO . V.mapM U.freeze . unLenProf
+
+lpAppend :: LenProf -> LenProf -> LenProf
+lpAppend (LenProf v1) (LenProf v2) = LenProf (v1 V.++ v2)
 
 lpTotal :: LenProf -> Int
 lpTotal = V.sum . V.map U.sum . unLenProf
