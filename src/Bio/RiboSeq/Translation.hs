@@ -2,8 +2,8 @@
 module Bio.RiboSeq.Translation
        where 
        
-import Data.ByteString.Char8 as BS       
-import qualified Data.List as L (find)
+import qualified Data.ByteString.Char8 as BS       
+import qualified Data.List as L (find, unfoldr)
 
 inFrameStopIdx :: BS.ByteString -> Maybe Int
 inFrameStopIdx sequ = L.find isStop codonStarts
@@ -14,8 +14,17 @@ ntToAaAt :: BS.ByteString -> Int -> Maybe Amino
 ntToAaAt sequ i | i < 0     = Nothing
                 | otherwise = lookup (BS.take 3 $ BS.drop i sequ) trans_tbl
 
---translateSequ :: BS.ByteString -> [Maybe Amino]
---translateSequ ntsequ = 
+sequCodons :: BS.ByteString -> [BS.ByteString]
+sequCodons = L.unfoldr splitcodon
+  where splitcodon sequ | BS.null sequ = Nothing
+                        | otherwise = Just (BS.take 3 sequ, BS.drop 3 sequ)
+
+translateSequ :: BS.ByteString -> [Maybe Amino]
+translateSequ = map ntToAa . sequCodons
+  where ntToAa c = lookup c trans_tbl
+        
+trlOneLetter :: BS.ByteString -> BS.ByteString
+trlOneLetter = BS.pack . map oneLetterM . translateSequ
 
 data Amino = Ala | Arg | Asn | Asp | Cys | Gln | Glu | Gly
            | His | Ile | Leu | Lys | Met | Phe | Pro | Ser

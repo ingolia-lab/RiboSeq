@@ -3,41 +3,85 @@
 module Bio.RiboSeq.Starts
        where
 
+import Control.Monad
 import qualified Data.ByteString.Char8 as BS
 import Data.List
+import Data.Maybe
 
 import qualified Data.Vector.Unboxed as U
 
+import qualified Bio.SeqLoc.Location as Loc
+import Bio.SeqLoc.Position as Pos
+import qualified Bio.SeqLoc.SpliceLocation as SpLoc
 import Bio.SeqLoc.OnSeq
+import Bio.SeqLoc.Strand
 import Bio.SeqLoc.Transcript
 
 import Bio.RiboSeq.BamFile
+import Bio.RiboSeq.Translation
 
 data Start = Start { startPeak :: !Peak
                    , startTrx :: !Transcript
                    , startSequ :: !BS.ByteString
                    }
              
+peakBed :: Start -> Transcript
+peakBed (Start pk trx sequ) = Transcript { geneId = geneId trx
+                                         , trxId = peakName
+                                         , location = location trx
+                                         , cds = peakcds
+                                         }
+  where peakName = toSeqLabel $ (unSeqLabel . geneId $ trx) `BS.append` "_" `BS.append` (BS.pack . ishow . peakAny $ pk)
+        peakcds = case peakStartCodon trx sequ pk of
+          [sc] -> let restnt = BS.drop sc sequ
+                      orflen = maybe (BS.length restnt) (+ 2) . inFrameStopIdx $ restnt
+                  in Just $! Loc.fromPosLen (Pos.Pos (fromIntegral sc) Plus) (fromIntegral orflen)
+          _ -> Nothing
+
 peakStart :: Start -> BS.ByteString
 peakStart (Start pk trx sequ) = BS.intercalate "\t" $ case peakStartCodon trx sequ pk of
   [] -> noCodonFields
   [sc] -> oneCodonFields sc
   _ -> manyCodonFields
   where sharedFields = [ unSeqLabel . geneId $ trx, peakrange, peaktype, bothrange ]
-        noCodonFields = sharedFields ++ [ "???" ]
-        manyCodonFields = sharedFields ++ [ "***" ]
+        noCodonFields = sharedFields ++ [ "???", peakcodons ]
+        manyCodonFields = sharedFields ++ [ "***", peakcodons ]
         oneCodonFields sc = sharedFields 
                             ++ [ BS.pack . show $ sc, isInBoth sc ] 
                             ++ orfAnalysis trx sequ sc
-        peakrange = BS.pack $ show (ilb . peakAny $ pk) ++ "-" ++ show (iub . peakAny $ pk)
+        peakrange = BS.pack . ishow . peakAny $ pk
         peaktype = BS.pack $ peakTypeCode pk
-        bothrange = maybe "N/A" (\i -> BS.pack $ show (ilb i) ++ "-" ++ show (iub i)) $ peakBoth pk
+        bothrange = maybe "N/A" (BS.pack . ishow) . peakBoth $ pk
         isInBoth sc = BS.pack . show . maybe False (\(Interval bl bu) -> sc >= bl && sc <= bu) $ peakBoth pk
+        peakcodons = BS.take ((ilength . peakAny $ pk) + 2) . BS.drop (ilb . peakAny $ pk) $ sequ
 
 orfAnalysis trx sequ sc = [ BS.take 3 . BS.drop sc $ sequ
-                          , maybe "N/A" (\cds -> BS.pack . show $ sc - cds) mcds
+                          , mbsshow morflen
+                          , mbsshow mstartoff
+                          , mbsshow mendoff
+                          , categ
+                          , orfaa
                           ]
-  where mcds = trxVectorStart (TrxVector trx (U.empty :: U.Vector Bool))                          
+  where bsshow = BS.pack . show
+        mbsshow = maybe "N/A" bsshow
+        mcdsstart = liftM (fromIntegral . Loc.offset5) . cds $ trx
+        mstartoff = liftM (sc -) mcdsstart
+        mcdsend = liftM (fromIntegral . Pos.offset . Loc.endPos) . cds $ trx
+        morflen = liftM (+ 2) . inFrameStopIdx . BS.drop sc $ sequ
+        morfend = liftM (+ sc) morflen
+        mendoff = liftM2 (-) morfend mcdsend
+        orfnt = maybe (BS.drop sc sequ) (\len -> BS.take len . BS.drop sc $ sequ) morflen
+        orfaa = trlOneLetter orfnt
+        categ = case mstartoff of
+          Nothing -> "sprc"
+          Just 0 -> "canonical"
+          Just startoff | startoff > 0 -> case mendoff of
+            Just 0 -> "truncation"
+            _      -> "internal-out-of-frame"
+          Just startoff | startoff < 0 -> case (morflen, mendoff) of
+            (Just len, _) | len < startoff -> "uorf"
+            (_, Just 0)                    -> "extension"
+            _ -> "uorf-overlapping"
 
 peakStartCodon :: Transcript -> BS.ByteString -> Peak -> [Int]
 peakStartCodon trx sequ pk | not (null augBoth) = augBoth
@@ -56,6 +100,12 @@ data Interval = Interval { ilb, iub :: !Int } deriving (Show)
 
 irange :: Interval -> [Int]
 irange (Interval ilb iub) = [ilb..iub]
+
+ilength :: Interval -> Int
+ilength (Interval ilb iub) = 1 + iub - ilb
+
+ishow :: Interval -> String
+ishow (Interval lb ub) = show lb ++ "-" ++ show ub
 
 data Peak = Peak { peakAny :: !Interval
                  , peakHarr, peakLtm, peakBoth :: !(Maybe Interval)

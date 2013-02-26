@@ -7,6 +7,7 @@ module Main
 import Control.Applicative
 import Control.Monad
 import qualified Data.ByteString.Char8 as BS
+import Data.Char
 import Data.Maybe
 import Numeric
 import System.Exit
@@ -39,17 +40,19 @@ main = run ( startSites, info)
           trxs <- Bed.readBedTranscripts bed
           FaIdx.withFastaIndex fidx $ \hfa -> 
             withFile out WriteMode $ \hout ->
-            forM_ trxs $ processTrx mharr mltm hfa hout
+            withFile (dropExtension out ++ ".bed") WriteMode $ \hbed ->
+            forM_ trxs $ processTrx mharr mltm hfa hout hbed
               
-processTrx :: (Maybe HarrModel) -> (Maybe (LtmModel, LtmSamples)) -> FaIdx.InHandle -> Handle -> Transcript -> IO ()
-processTrx mharr mltm hfa hout trx = do 
+processTrx :: (Maybe HarrModel) -> (Maybe (LtmModel, LtmSamples)) -> FaIdx.InHandle -> Handle -> Handle -> Transcript -> IO ()
+processTrx mharr mltm hfa hout hbed trx = do 
   hmstart <- harrStarts mharr trx
   lmstart <- ltmStarts mltm trx
-  sequ <- liftM (fromMaybe BS.empty) $ FaIdx.fetchLoc hfa (location trx)
+  sequ <- liftM (BS.map toUpper . fromMaybe BS.empty) $ FaIdx.fetchLoc hfa (location trx)
   let pks = peaks hmstart lmstart
   forM_ (peaks hmstart lmstart) $ \pk ->
     let st = Start pk trx sequ
-    in BS.hPutStrLn hout $ peakStart st
+    in do BS.hPutStrLn hout $ peakStart st
+          BS.hPutStrLn hbed $ Bed.transcriptToBedStd $ peakBed st
   
 --  mapM_ (\f -> BS.hPutStrLn hout $ (unSeqLabel . geneId $ trx) `BS.append` "\t" `BS.append` BS.pack f) fs
 --  BS.hPutStrLn hout $ jointLine trx (fromJust hmstart) (fromJust lmstart)
