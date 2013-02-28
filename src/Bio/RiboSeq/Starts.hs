@@ -67,8 +67,8 @@ orfAnalysis trx sequ sc = [ BS.take 3 . BS.drop sc $ sequ
         mcdsstart = liftM (fromIntegral . Loc.offset5) . cds $ trx
         mstartoff = liftM (sc -) mcdsstart
         mcdsend = liftM (fromIntegral . Pos.offset . Loc.endPos) . cds $ trx
-        morflen = liftM (+ 2) . inFrameStopIdx . BS.drop sc $ sequ
-        morfend = liftM (+ sc) morflen
+        morflen = liftM (+ 3) . inFrameStopIdx . BS.drop sc $ sequ
+        morfend = liftM (+ (sc - 1)) morflen
         mendoff = liftM2 (-) morfend mcdsend
         orfnt = maybe (BS.drop sc sequ) (\len -> BS.take len . BS.drop sc $ sequ) morflen
         orfaa = trlOneLetter orfnt
@@ -79,8 +79,8 @@ orfAnalysis trx sequ sc = [ BS.take 3 . BS.drop sc $ sequ
             Just 0 -> "truncation"
             _      -> "internal-out-of-frame"
           Just startoff | startoff < 0 -> case (morflen, mendoff) of
-            (Just len, _) | len < startoff -> "uorf"
-            (_, Just 0)                    -> "extension"
+            (Just len, _) | len + startoff < 0 -> "uorf"
+            (_, Just 0)                        -> "extension"
             _ -> "uorf-overlapping"
 
 peakStartCodon :: Transcript -> BS.ByteString -> Peak -> [Int]

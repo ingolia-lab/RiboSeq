@@ -40,7 +40,7 @@ main = run ( startSites, info)
           trxs <- Bed.readBedTranscripts bed
           FaIdx.withFastaIndex fidx $ \hfa -> 
             withFile out WriteMode $ \hout ->
-            withFile (dropExtension out ++ ".bed") WriteMode $ \hbed ->
+            withFile (dropExtension out ++ "-orf.bed") WriteMode $ \hbed ->
             forM_ trxs $ processTrx mharr mltm hfa hout hbed
               
 processTrx :: (Maybe HarrModel) -> (Maybe (LtmModel, LtmSamples)) -> FaIdx.InHandle -> Handle -> Handle -> Transcript -> IO ()

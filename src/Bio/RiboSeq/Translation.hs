@@ -33,7 +33,7 @@ data Amino = Ala | Arg | Asn | Asp | Cys | Gln | Glu | Gly
            deriving (Show,Eq)
               
 oneLetterM :: Maybe Amino -> Char
-oneLetterM = maybe 'N' oneLetter
+oneLetterM = maybe 'X' oneLetter
 
 oneLetter :: Amino -> Char
 oneLetter aa = case aa of
