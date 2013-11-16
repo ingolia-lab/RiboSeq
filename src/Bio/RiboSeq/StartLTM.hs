@@ -122,6 +122,33 @@ ltmTestScore (TrxLtmProf ltmp@(TrxVector _ ltm) chxp@(TrxVector _ chx)) dstart
                            , showz exp_c, showz (fromIntegral ltm_c - exp_c), showf (fromIntegral ltm_c / exp_c)
                            ]
 
+--ltmTestAll :: TrxLtmProf -> [String]
+--ltmTestAll prof@(TrxLtmProf ltmp@(TrxVector _ ltm) chxp@(TrxVector _ chx)) dstart
+--  = [ ltmTestPosition prof d | d <- [0..(U.length ltm - 6)] ]
+
+ltmTestPosition :: TrxLtmProf -> Int -> String
+ltmTestPosition (TrxLtmProf ltmp@(TrxVector _ ltm) chxp@(TrxVector _ chx)) dstart
+  = intercalate "\t" . addname . maybe ["n/a"] (atpos . (+ dstart)) $ trxVectorStart ltmp
+  where addname = ((BS.unpack $ trxVectorName ltmp) :)
+        atpos st 
+          | st < 0 || st + 5 >= U.length ltm = [ "n/a" ]
+          | otherwise = let ltm_st = ltm U.! (st + 3)
+                            ltm_ttl = fromIntegral $ U.sum ltm
+                            ltm_max | (st - 1 >= 0) = (U.maxIndex . U.take 9 . U.drop (st - 1) $ ltm) - 1
+                                    | otherwise     = (U.maxIndex . U.take 7                   $ ltm)
+                            chx_st = chx U.! (st + 3)
+                            chx_ttl = fromIntegral $ U.sum chx
+                            showz :: Double -> String
+                            showz x = showFFloat (Just 0) x ""
+                            showf :: Double -> String
+                            showf x = showFFloat (Just 4) x ""
+                            ltm_c = U.sum . U.take 3 . U.drop (st + 2) $ ltm
+                            chx_c = U.sum . U.take 3 . U.drop (st + 2) $ chx
+                            exp_c | chx_ttl > 0.5 = (fromIntegral chx_c) * ltm_ttl / chx_ttl
+                                  | otherwise = 0.0
+                        in [ show dstart, show ltm_c, showz exp_c ]
+
+
 -- Identiﬁcation of TIS Positions. A peak is deﬁned at the nucleotide
 -- level on a transcript. A peak position satisﬁes the following conditions: (i) The transcript must have both LTM and CHX reads.
 -- (ii) The position must have at least 10 reads from the LTM data.

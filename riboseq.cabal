@@ -168,3 +168,22 @@ Executable start-sites
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
   Default-Language:    Haskell2010  
+
+Executable pars-stats
+  Main-Is:             ParsStats.hs
+  Other-modules:       Bio.RiboSeq.Pars
+  Build-depends:       base, bytestring, containers, attoparsec >= 0.8.5, filepath, process, unix, directory,
+                       transformers, monads-tf, vector, conduit, MonadCatchIO-transformers, cmdtheline, lens,
+                       unordered-containers, seqloc
+  Hs-Source-Dirs:      src
+  Ghc-options:         -auto-all -O2 -Wall
+  Default-Language:    Haskell2010  
+  
+Executable yassour-uorf
+  Main-Is:             YassourUorf.hs
+  Other-modules:       Bio.RiboSeq.CodonAssignment
+  Build-depends:       base, bytestring, filepath, process, unix, directory, attoparsec >= 0.8.5, iteratee,
+                       transformers, monads-tf, vector,
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+  Hs-Source-Dirs:      src
+  Ghc-options:          -auto-all -O2 -Wall

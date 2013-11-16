@@ -3,7 +3,7 @@
 module Bio.RiboSeq.Pars
        where
 
-import Control.Applicative
+import Control.Applicative ()
 import Control.Monad
 import qualified Data.ByteString.Char8 as BS
 import Data.Functor.Identity
@@ -13,7 +13,6 @@ import Data.Ord
 import Numeric
 
 import Control.Lens
-import Control.Monad.CatchIO
 
 import qualified Data.Attoparsec.ByteString.Char8 as AP
 import qualified Data.Conduit as C
@@ -89,9 +88,10 @@ readParsScoreMap f = C.runResourceT $ C.sourceFile f C.$$ (C.lines C.=$ C.fold i
                                             parseScore = either error id . AP.parseOnly AP.double
                                             duplicate = error $ "Duplicate for " ++ show geneid ++ ": " ++ show l
                                         in M.insertWith duplicate geneid scores sc0
-                                           
-parsStats :: ParsMap -> ScoreMap -> BS.ByteString
-parsStats trxmap scoremap = BS.unlines $ mapMaybe statLine geneIDs
+          _ -> error $ "Malformed score line " ++ show l
+
+parsStatTable :: ParsMap -> ScoreMap -> BS.ByteString
+parsStatTable trxmap scoremap = BS.unlines $ header : mapMaybe statLine geneIDs
   where geneIDs = M.keys scoremap
         statLine geneid = do trx <- M.lookup geneid trxmap
                              score <- M.lookup geneid scoremap
@@ -99,6 +99,7 @@ parsStats trxmap scoremap = BS.unlines $ mapMaybe statLine geneIDs
                              case fromIntegral . fst . Loc.bounds $ cds of
                                start | start > 0 -> Just $! statUtr5 trx score start
                                      | otherwise -> Nothing
+        header = BS.intercalate "\t" [ "# YORF", "Length", "Total", "Avg", "First30", "Start30", "Max30Pos", "Max30" ]
         statUtr5 :: ParsTrx -> U.Vector Double -> Int -> BS.ByteString
         statUtr5 trx score start = BS.intercalate "\t" fields
           where fields = [ unSeqLabel . ptrxName $ trx
@@ -106,6 +107,7 @@ parsStats trxmap scoremap = BS.unlines $ mapMaybe statLine geneIDs
                          , showf total
                          , showf $ total / len
                          , first30
+                         , start30
                          , maybe "N/A" (BS.pack . show . negate) max30off
                          , maybe "N/A" (showf . window30) max30off
                          ]
@@ -114,6 +116,8 @@ parsStats trxmap scoremap = BS.unlines $ mapMaybe statLine geneIDs
                 total = U.sum . U.take start $ score
                 first30 | U.length score < 30 = "N/A"
                         | otherwise = showf . U.sum . U.take 30 $ score
+                start30 | start >= 15 && U.length score > start + 15 = showf . U.sum . U.take 30 . U.drop (start - 15) $ score
+                        | otherwise = "N/A"
                 max30off | start >= 18 = Just $ maximumBy (comparing window30) [18..start]
                          | otherwise = Nothing
                 window30 i = U.sum . U.take 30 . U.drop (start - i) $ score
