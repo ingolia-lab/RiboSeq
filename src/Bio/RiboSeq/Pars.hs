@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE Rank2Types #-}
 module Bio.RiboSeq.Pars
        where
 
