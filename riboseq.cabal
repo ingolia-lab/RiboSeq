@@ -187,3 +187,11 @@ Executable yassour-uorf
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   Ghc-options:          -auto-all -O2 -Wall
+
+Executable quant-table
+  Main-is:             QuantTable.hs
+  Other-modules:       Bio.RiboSeq.QExpr
+  Build-depends:       base, bytestring, attoparsec, transformers,
+                       monads-tf, containers >= 0.4.0.0, filepath, statistics, vector
+  Hs-Source-Dirs:      src
+  Ghc-Options:         -auto-all -O2 -Wall
