@@ -59,8 +59,8 @@ trainHarr model posns trxset = trainSVM learn fields posns (harrMinTotal model) 
         fields = aaSvmFields . harrAaFields $ model
         trxsrc = C.sourceList trxset C.$= C.mapM (readHarrProfiles model)
 
-testHarr :: HarrModel -> TrainPosns -> [Transcript] -> IO TestScore
-testHarr model posns trxset = testSVM classify fields posns (harrMinTotal model) trxsrc
+testHarr :: HarrModel -> TrainPosns -> Bool -> [Transcript] -> IO TestScore
+testHarr model posns keeptemp trxset = testSVM classify fields posns (harrMinTotal model) keeptemp trxsrc
   where classify = defaultClassify { classifyBinary = harrBinDir model </> "svm_classify"
                                    , modelIn = harrSvmModel model
                                    }
@@ -78,8 +78,8 @@ svmStartProfile model trx = do profset <- readHarrProfiles model trx
 
 scoreProfile :: RunSVMClassify -> SVMFields -> Int -> TrxProfSet -> FilePath -> IO (U.Vector Double)
 scoreProfile classify fields mintotal profset scoredir
-    = withTempFileName (scoredir </> "query") $ \query ->
-      withTempFileName (scoredir </> "score") $ \rawscore -> do
+    = withTempFileName False (scoredir </> "query") $ \query ->
+      withTempFileName False (scoredir </> "score") $ \rawscore -> do
         BS.writeFile query . BS.unlines $ profileQuerySet fields mintotal profset
         err <- runSVMClassify $ classify { queriesIn = query, decisionsOut = rawscore }
         case err of
@@ -110,15 +110,15 @@ profileQuerySet fields mintotal profset = map exampleAt posns
           where justInfo = '#' `BS.cons` profilesInfo fields profset p
 
 trainSVM :: RunSVMLearn -> SVMFields -> TrainPosns -> Int -> C.Source IO TrxProfSet -> IO ExitCode
-trainSVM learn fields posns mintotal trxsrc = withTempFile exampleBase $ \(exfile, hex) -> do
+trainSVM learn fields posns mintotal trxsrc = withTempFile False exampleBase $ \(exfile, hex) -> do
   putTrainingSet hex fields posns mintotal trxsrc
   runSVMLearn $ learn { examplesIn = exfile }
     where exampleBase = (takeBaseName . modelOut $ learn) ++ "-training"
     
-testSVM :: RunSVMClassify -> SVMFields -> TrainPosns -> Int -> C.Source IO TrxProfSet -> IO TestScore
-testSVM classify fields posns mintotal trxsrc
-    = withTempFile exampleBase $ \(exfile, hex) ->
-      withTempFileName scoreBase $ \score ->
+testSVM :: RunSVMClassify -> SVMFields -> TrainPosns -> Int -> Bool -> C.Source IO TrxProfSet -> IO TestScore
+testSVM classify fields posns mintotal keeptemp trxsrc
+    = withTempFile keeptemp exampleBase $ \(exfile, hex) ->
+      withTempFileName keeptemp scoreBase $ \score ->
           do putTrainingSet hex fields posns mintotal trxsrc
              hClose hex
              ec <- runSVMClassify $ classify { queriesIn = exfile, decisionsOut = score }
@@ -150,14 +150,6 @@ defaultTrainPosns = TrainPosns { posnStarts = [ 0 ]
                                , posnNonStarts = [ -6, -3, 3, 9, 18, 30, 60, 90, 120, 150 ]
                                }
 
--- testNtUpstream :: ([Int], [Int])
--- testNtUpstream = ([ 0 ], [ -12, -6 ])
-
--- testNtCoding :: ([Int], [Int])
--- testNtCoding = ([ 0 ], [ 45, 105, 165, 210 ])
-
--- -- 
-
 profilesExample :: SVMFields -> Int -> BS.ByteString -> TrxProfSet -> Int -> Maybe BS.ByteString
 profilesExample fields mintotal target profset ntpos = do 
   fvals <- profilesFields fields profset ntpos
@@ -166,13 +158,26 @@ profilesExample fields mintotal target profset ntpos = do
         | otherwise -> Just $! '#' `BS.cons` profilesInfo fields profset ntpos
 
 profilesInfo :: SVMFields -> TrxProfSet -> Int -> BS.ByteString
-profilesInfo fields profset ntpos = BS.unwords [ trxProfSetName profset, BS.pack . show $ ntpos, readCountBS ]
+profilesInfo fields profset ntpos = BS.unwords [ trxProfSetName profset, BS.pack . show $ ntpos, readCountBS, groupBS, posnsBS ]
     where readCountBS = maybe (BS.pack "n/a") (BS.pack . show . sum) $ profilesFields fields profset ntpos
+          fieldsBS = BS.pack . show $ profilesFields fields profset ntpos
+          groupBS = BS.pack . show $ map (\fgr -> profilesFields fgr profset ntpos) $ groupFields fields
+          posnsBS = BS.pack . show $ profilesFields (singleFields fields) profset ntpos
 
 profilesFields :: SVMFields -> TrxProfSet -> Int -> Maybe [Int]
 profilesFields fields profs ntpos = liftM concat . mapM (vectorFields fields ntpos) $ profiles profs
 
 data SVMFields = SVMFields { ntoffsets :: [[Int]] } deriving (Show)
+
+minField, maxField :: SVMFields -> Int
+minField = minimum . minimum . ntoffsets
+maxField = maximum . maximum . ntoffsets
+
+singleFields :: SVMFields -> SVMFields
+singleFields fields = SVMFields . map (: []) $ [(minField fields)..(maxField fields)]
+
+groupFields :: SVMFields -> [SVMFields]
+groupFields fields = map (SVMFields . map (: [])) . ntoffsets $ fields
 
 profilesTotal :: SVMFields -> TrxProfSet -> Int -> Maybe Int
 profilesTotal fields profs = liftM sum . profilesFields fields profs
@@ -204,17 +209,14 @@ normalize zs | total == 0 = replicate (length zs) 0.0
     where total = sum . map (^ (2 :: Int)) $ zs
           norm = (/ (sqrt . fromIntegral $ total)) . fromIntegral
 
-keepTemp :: Bool
-keepTemp = False
-
-withTempFile :: FilePath -> ((FilePath, Handle) -> IO a) -> IO a
-withTempFile tmpbase = bracket (mkstemp tmpnam) closeAndRemove 
+withTempFile :: Bool -> FilePath -> ((FilePath, Handle) -> IO a) -> IO a
+withTempFile keepTemp tmpbase = bracket (mkstemp tmpnam) closeAndRemove 
     where tmpnam = tmpbase ++ "XXXXXX"
           closeAndRemove (tmpfile, htmp) = do hIsOpen htmp >>= flip when (hClose htmp)
                                               unless keepTemp $ doesFileExist tmpfile >>= flip when (removeFile tmpfile)
 
-withTempFileName :: FilePath -> (FilePath -> IO a) -> IO a
-withTempFileName tmpbase = withTempFile tmpbase . closeHandle
+withTempFileName :: Bool -> FilePath -> (FilePath -> IO a) -> IO a
+withTempFileName keepTemp tmpbase = withTempFile keepTemp tmpbase . closeHandle
     where closeHandle act (tmpfile, htmp) = hClose htmp >> act tmpfile
 
 --        Profile.writeVectorProfileWith showf scorefile $ Profile.fromInfo info scorevec

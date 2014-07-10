@@ -43,18 +43,18 @@ main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
                           hPutStrLn stderr errs
 
 doFpTranscript :: FilePath -> Conf -> IO ()
-doFpTranscript bam conf = do asites <- readASite $ confASite conf
+doFpTranscript bam conf = do asites <- readASiteDelta $ confASite conf
                              bracket (BamIndex.open bam) BamIndex.close $ \bidx ->
                                findTranscript (confBeds conf) (confTranscript conf) >>= \trx ->
                                doTranscript conf asites bidx trx
 
-doTranscript :: Conf -> ASites -> BamIndex.IdxHandle -> Transcript -> IO ()
+doTranscript :: Conf -> ASiteDelta -> BamIndex.IdxHandle -> Transcript -> IO ()
 doTranscript conf
   | confByLength conf  = doTranscriptByLength conf
   | confCdsCodons conf = doTranscriptCodon conf
   | otherwise          = doTranscriptNt conf
                         
-doTranscriptByLength :: Conf -> ASites -> BamIndex.IdxHandle -> Transcript -> IO ()
+doTranscriptByLength :: Conf -> ASiteDelta -> BamIndex.IdxHandle -> Transcript -> IO ()
 doTranscriptByLength conf asites bidx trx
   = do prof <- transcriptNtLengthProfile asites bidx trx
        msequ <- maybe (return Nothing) (flip FaIdx.readLoc (location trx)) (confFasta conf)
@@ -62,15 +62,15 @@ doTranscriptByLength conf asites bidx trx
        writeFile (confOutput conf) pf
        writeInfo conf hdrs
 
-doTranscriptCodon :: Conf -> ASites -> BamIndex.IdxHandle -> Transcript -> IO ()
+doTranscriptCodon :: Conf -> ASiteDelta -> BamIndex.IdxHandle -> Transcript -> IO ()
 doTranscriptCodon conf asites bidx trx
-  = do (hdrs, pf) <- liftM (codonProfile trx) $ transcriptNtProfile (aSiteDelta asites) bidx trx
+  = do (hdrs, pf) <- liftM (codonProfile trx) $ transcriptNtProfile asites bidx trx
        writeInfo conf hdrs
        writeFile (confOutput conf) pf
 
-doTranscriptNt :: Conf -> ASites -> BamIndex.IdxHandle -> Transcript -> IO ()
+doTranscriptNt :: Conf -> ASiteDelta -> BamIndex.IdxHandle -> Transcript -> IO ()
 doTranscriptNt conf asites bidx trx
-  = do prof <- transcriptNtProfile (aSiteDelta asites) bidx trx
+  = do prof <- transcriptNtProfile asites bidx trx
        msequ <- maybe (return Nothing) (flip FaIdx.readLoc (location trx)) (confFasta conf)
        let (hdrs, pf) = ntProfile trx msequ prof
        writeFile (confOutput conf) pf

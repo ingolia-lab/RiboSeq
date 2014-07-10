@@ -24,8 +24,8 @@ main = run ( testHarrStart, info)
                      , version = "0.0"
                      , termDoc = "Testing start site prediction"
                      }
-        testHarrStart = test <$> modelfile <*> bedfile <*> scorefile
-        test modfile bed mscore = do
+        testHarrStart = test <$> keeptemp <*> modelfile <*> bedfile <*> scorefile
+        test kt modfile bed mscore = do
           modelstr <- readFile modfile
           model <- case reads modelstr of
             [(m, "")] -> return m
@@ -33,7 +33,7 @@ main = run ( testHarrStart, info)
                     exitFailure
           trxs <- Bed.readBedTranscripts bed
           hPutStrLn stderr $ "Read " ++ show (length trxs) ++ " testing transcripts"
-          tsc <- testHarr model defaultTrainPosns trxs
+          tsc <- testHarr model defaultTrainPosns kt trxs
           putStrLn $ "TrainPosns\t" ++ displayTestCount (countPartition tsc)
           maybe (return ()) (writeScore tsc) mscore
 
@@ -63,3 +63,6 @@ bedfile = required $ opt Nothing $ (optInfo [ "t", "transcripts" ])
 scorefile :: Term (Maybe String)
 scorefile = value $ opt Nothing $ (optInfo [ "o", "output" ])
   { optName = "SCORE-BASE", optDoc = "Base filename for scores" }
+
+keeptemp :: Term Bool
+keeptemp = value $ flag $ (optInfo [ "k", "keep-intermediates" ]) { optDoc = "Keep intermediate scoring files" }

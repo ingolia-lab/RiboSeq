@@ -1,6 +1,6 @@
-module Bio.RiboSeq.CodonAssignment ( ASites, ASiteDelta
+module Bio.RiboSeq.CodonAssignment ( ASites, ASiteDelta(asdStrand, asdRange)
                                    , readASite, readASiteDelta
-                                   , aSiteRange, aSiteDelta, aSitePos
+                                   , aSiteRange, aSitePos
                                    , CodonFrame, cfCodon, cfFrame
                                    , ntOffsetToCodonFrame, codonFrameToNtOffset
                                    , ntCodonFrameFromStart, ntCodonFrameFromEnd
@@ -30,11 +30,12 @@ import Bio.SeqLoc.Strand
 import Bio.SeqLoc.Transcript
 
 type ASites = [(Pos.Offset, Pos.Offset)]
-type ASiteDelta = Pos.Offset -> Maybe Pos.Offset
+data ASiteDelta = ASiteDelta { asdOffset :: !(Pos.Offset -> Maybe Pos.Offset), asdStrand :: !Strand, asdRange :: !(Pos.Offset, Pos.Offset) }
 
 -- | Read a mapping from fragment lengths to A site relative positions
 readASiteDelta :: FilePath -> IO ASiteDelta
-readASiteDelta = liftM aSiteDelta . readASite
+readASiteDelta f = do asites <- readASite f
+                      return $! ASiteDelta { asdOffset = asitesToOffset asites, asdStrand = Plus, asdRange = aSiteRange asites }
 
 -- | Read an association list of fragment lengths and relative A site
 -- positions. 
@@ -50,8 +51,8 @@ aSiteParser = AP.many1 aSiteLine
   where aSiteLine = (,) <$> AP.decimal <*> 
                     (AP.skipSpace *> AP.signed AP.decimal <* (AP.endOfLine <|> AP.endOfInput))
                     
-aSiteDelta :: ASites -> Pos.Offset -> Maybe Pos.Offset
-aSiteDelta offsets = lookupLength
+asitesToOffset :: ASites -> Pos.Offset -> Maybe Pos.Offset
+asitesToOffset offsets = lookupLength
   where offsetVector = nothings V.// map ( fromIntegral *** Just ) offsets
           where nothings = V.replicate maxoff Nothing
                 maxoff = fromIntegral . maximum . (0 :) . map (succ . fst) $ offsets
@@ -67,7 +68,7 @@ aSiteRange offsets = (minimum lens, maximum lens)
 -- precisely on a codon boundary, from the footprint alignment
 -- location.
 aSitePos :: (Loc.Location l) => ASiteDelta -> l -> Maybe Pos.Pos
-aSitePos delta loc = delta (Loc.length loc) >>= \inpos -> Loc.posOutof (Pos.Pos inpos Plus) loc
+aSitePos delta loc = (asdOffset delta) (Loc.length loc) >>= \inpos -> Loc.posOutof (Pos.Pos inpos Plus) loc
   
 data CodonFrame = CodonFrame { cfCodon, cfFrame :: !Pos.Offset }
                   deriving (Show)
@@ -173,8 +174,9 @@ data ReadASite = Incompatible
 trxReadASite :: ASiteDelta -> Transcript -> SpLoc.SpliceLoc -> ReadASite
 trxReadASite asite trx = maybe Incompatible readContigASite . trxReadContig trx
   where readContigASite = maybe BadLength validatePos . aSitePos asite
-        validatePos (Pos.Pos o Plus) 
-          | o >= 0 && o < Loc.length (unOnSeq . location $ trx) = ReadASite o
+        validatePos (Pos.Pos o str) 
+          | o >= 0 && o < Loc.length (unOnSeq . location $ trx) 
+            && str == asdStrand asite = ReadASite o
         validatePos _ = Outside
 
 -- | Determine the CDS location of the A site within a read.

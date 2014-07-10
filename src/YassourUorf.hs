@@ -46,7 +46,7 @@ main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
                           hPutStrLn stderr errs
 
 doYassourUorf :: FilePath -> Conf -> IO ()
-doYassourUorf bam conf = do asites <- readASite $ confASite conf
+doYassourUorf bam conf = do asites <- readASiteDelta $ confASite conf
                             bracket (BamIndex.open bam) BamIndex.close $ \bidx ->
                               withFile (confOutput conf) WriteMode $ \hout ->
                               withFile (confOutProfiles conf) WriteMode $ \hprof ->
@@ -54,9 +54,9 @@ doYassourUorf bam conf = do asites <- readASite $ confASite conf
                               mapOverTranscripts (confBeds conf) $ \trx ->
                               doTranscript conf asites bidx trx hout hprof hbed
 
-doTranscript :: Conf -> ASites -> BamIndex.IdxHandle -> Transcript -> Handle -> Handle -> Handle -> IO ()
+doTranscript :: Conf -> ASiteDelta -> BamIndex.IdxHandle -> Transcript -> Handle -> Handle -> Handle -> IO ()
 doTranscript conf asites bidx trx hout hprof hbed
-  = do prof <- transcriptNtProfile (aSiteDelta asites) bidx trx
+  = do prof <- transcriptNtProfile asites bidx trx
        msequ <- FaIdx.readLoc (confFasta conf) (location trx) 
        maybe noSequence (\sequ -> maybe noCDS (doProfSequ prof sequ) $ cds trx) msequ
   where noSequence = hPutStrLn stderr $ "Could not get sequence for " ++ (show . unSeqLabel . trxId $ trx)

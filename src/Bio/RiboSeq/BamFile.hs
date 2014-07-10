@@ -141,12 +141,12 @@ transcriptNtProfile asite bidx trx = do
 -- | Count reads whose A site is assigned to each nucleotide position
 -- on a transcript, as determined by 'trxReadASite', stratified by
 -- length.
-transcriptNtLengthProfile :: ASites -> BamIndex.IdxHandle -> Transcript -> IO (V.Vector (EnumCount Pos.Offset))
+transcriptNtLengthProfile :: ASiteDelta -> BamIndex.IdxHandle -> Transcript -> IO (V.Vector (EnumCount Pos.Offset))
 transcriptNtLengthProfile asites bidx trx = 
-  let lenbnds@(lenmin, lenmax) = aSiteRange asites
+  let lenbnds@(lenmin, lenmax) = asdRange asites
       trxlen = fromIntegral . Loc.length . unOnSeq . location $ trx
   in do ntcts <- V.replicateM trxlen (newEnumCountIO lenbnds) >>= V.thaw
-        let count = onReadASite (aSiteDelta asites) trx $ \bam off ->
+        let count = onReadASite asites trx $ \bam off ->
               let ioff = fromIntegral off
               in do lenct <- VM.read ntcts ioff
                     let len = maybe 0 Loc.length . Bam.refSpLoc $ bam

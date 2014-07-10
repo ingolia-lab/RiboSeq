@@ -76,8 +76,8 @@ doProfileDistribution bamfile conf =
   mapOverTranscripts ([ confBed conf ]) $ \trx -> 
   flip (maybe (return ())) (cds trx) $ \cdsloc -> do
     msequ <- maybe (return Nothing) (flip FaIdx.readLoc (location trx)) $! confFasta conf
-    asites <- readASite $ confASite conf
-    ntprof <- transcriptNtProfile (aSiteDelta asites) bidx trx
+    asites <- readASiteDelta $ confASite conf
+    ntprof <- transcriptNtProfile asites bidx trx
     let cprof = profileFromStart Nothing cdsloc ntprof
         (statline, pauselines) = pauses conf trx (trxSeq msequ cdsloc) cprof
     hPutStrLn hstat statline
