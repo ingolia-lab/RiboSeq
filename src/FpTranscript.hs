@@ -43,7 +43,8 @@ main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
                           hPutStrLn stderr errs
 
 doFpTranscript :: FilePath -> Conf -> IO ()
-doFpTranscript bam conf = do asites <- readASiteDelta $ confASite conf
+doFpTranscript bam conf = do asiteRaw <- readASiteDelta $ confASite conf
+                             let asites = asiteRaw { asdStrand = if confReverse conf then Minus else Plus }
                              bracket (BamIndex.open bam) BamIndex.close $ \bidx ->
                                findTranscript (confBeds conf) (confTranscript conf) >>= \trx ->
                                doTranscript conf asites bidx trx
@@ -185,6 +186,7 @@ data Conf = Conf { confOutput :: !(FilePath)
                  , confInfo :: !(Maybe (Maybe String))
                  , confCdsCodons :: !Bool
                  , confByLength :: !Bool
+                 , confReverse :: !Bool
                  } deriving (Show)
 
 confInfoFile :: Conf -> Maybe String
@@ -200,6 +202,7 @@ data Arg = ArgOutput { unArgOutput :: !String }
          | ArgInfo { unArgInfo :: !(Maybe String) }
          | ArgCdsCodons
          | ArgByLength
+         | ArgReverse
          deriving (Show, Read, Eq, Ord)
 
 argOutput :: Arg -> Maybe String
@@ -235,6 +238,7 @@ optDescrs = [ Option ['o'] ["output"]     (ReqArg ArgOutput "OUTFILE")   "Output
             , Option ['l'] ["lengths"]    (NoArg ArgByLength)            "Length stratified CDS profile"
             , Option ['f'] ["fasta"]      (ReqArg ArgFasta "FASTA")      "Indexed fasta file for sequence"
             , Option ['i'] ["info"]       (OptArg ArgInfo "FILENAME")    "CDS statistics to file"
+            , Option ['r'] ["reverse"]    (NoArg ArgReverse)             "Reverse strand reads"
             ]
 
 argsToConf :: [Arg] -> Either String Conf
@@ -247,7 +251,8 @@ argsToConf = runReaderT conf
                  findFastaArg <*>
                  findInfoArg <*>
                  ReaderT (return . elem ArgCdsCodons) <*>
-                 ReaderT (return . elem ArgByLength)
+                 ReaderT (return . elem ArgByLength) <*>
+                 ReaderT (return . elem ArgReverse)
           findOutput = ReaderT $ maybe (Left "No out base") return  . listToMaybe . mapMaybe argOutput
           findBeds = ReaderT $ return . mapMaybe argBed
           findASite = ReaderT $ maybe (Left "No A sites") return . listToMaybe . mapMaybe argASite
