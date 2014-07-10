@@ -135,6 +135,15 @@ profileFromEnd mmaxlen loc ntprof =
 extraBounds :: (Pos.Offset, Pos.Offset)
 extraBounds = ( 100, 100 )
 
+readOnTrx :: Transcript -> SpLoc.SpliceLoc -> Maybe Loc.ContigLoc
+readOnTrx trx loc = do bamiloc <- SpLoc.locInto loc exttloc
+                       case Loc.toContigs bamiloc of
+                             [ cloc ] -> Just $ Loc.slide (negate $ fst extraBounds) cloc
+                             _ -> Nothing
+  where (OnSeq _name tloc) = location trx
+        exttloc = Loc.extend extraBounds tloc
+
+
 -- | Determine the (contiguous) transcript location covered by a
 -- (possibly spliced) read location. 
 --
@@ -150,12 +159,9 @@ extraBounds = ( 100, 100 )
 -- situation, biologically, then reads containing a splice junction
 -- that is incompatible with the transcript structure.
 trxReadContig :: Transcript -> SpLoc.SpliceLoc -> Maybe Loc.ContigLoc
-trxReadContig trx loc = do bamiloc <- SpLoc.locInto loc exttloc
-                           case Loc.toContigs bamiloc of
-                             [ cloc ] | Loc.strand cloc == Plus -> Just $ Loc.slide (negate $ fst extraBounds) cloc
-                             _ -> Nothing
-  where (OnSeq _name tloc) = location trx
-        exttloc = Loc.extend extraBounds tloc
+trxReadContig trx loc = case readOnTrx trx loc of
+                          (Just cloc) | Loc.strand cloc == Plus -> Just cloc
+                          _ -> Nothing
 
 data ReadASite = Incompatible
                | BadLength
@@ -172,7 +178,7 @@ data ReadASite = Incompatible
 -- 'Nothing' is returned, though portions of the overall read can
 -- extend beyond the boundaries as described for 'trxReadContig'.
 trxReadASite :: ASiteDelta -> Transcript -> SpLoc.SpliceLoc -> ReadASite
-trxReadASite asite trx = maybe Incompatible readContigASite . trxReadContig trx
+trxReadASite asite trx = maybe Incompatible readContigASite . readOnTrx trx
   where readContigASite = maybe BadLength validatePos . aSitePos asite
         validatePos (Pos.Pos o str) 
           | o >= 0 && o < Loc.length (unOnSeq . location $ trx) 
