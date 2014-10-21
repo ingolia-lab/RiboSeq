@@ -174,7 +174,7 @@ Executable pars-stats
   Other-modules:       Bio.RiboSeq.Pars
   Build-depends:       base, bytestring, containers, attoparsec >= 0.8.5, filepath, process, unix, directory,
                        transformers, monads-tf, vector, conduit, MonadCatchIO-transformers, cmdtheline, lens,
-                       unordered-containers, seqloc
+                       unordered-containers, seqloc, conduit-extra, resourcet
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
   Default-Language:    Haskell2010  
@@ -193,5 +193,14 @@ Executable quant-table
   Other-modules:       Bio.RiboSeq.QExpr
   Build-depends:       base, bytestring, attoparsec, transformers,
                        monads-tf, containers >= 0.4.0.0, filepath, statistics, vector
+  Hs-Source-Dirs:      src
+  Ghc-Options:         -auto-all -O2 -Wall
+
+Executable fastx-split
+  Main-is:             FastxSplit.hs
+  Build-depends:       base >= 4.2 && < 5, bytestring,
+                       attoparsec >= 0.8.5, hashable, unordered-containers,
+                       iteratee >= 0.8.1, seqloc < 0.6, biocore >= 0.2,
+                       conduit, conduit-extra, vector, filepath, resourcet, cmdtheline
   Hs-Source-Dirs:      src
   Ghc-Options:         -auto-all -O2 -Wall

@@ -15,6 +15,7 @@ import Numeric
 
 import Control.Lens
 
+import qualified Control.Monad.Trans.Resource as R
 import qualified Data.Attoparsec.ByteString.Char8 as AP
 import qualified Data.Conduit as C
 import qualified Data.Conduit.Binary as C
@@ -67,7 +68,7 @@ insertTrxLocalLine tm0 l = case BS.split '\t' l of
 --trxLocalLinesSink = C.fold insertTrxLocalLine emptyTrxMap
 
 readTrxLocalMap :: FilePath -> IO TrxMap
-readTrxLocalMap f = C.runResourceT $ C.sourceFile f C.$$ (C.lines C.=$ C.fold insertTrxLocalLine emptyTrxMap)
+readTrxLocalMap f = R.runResourceT $ C.sourceFile f C.$$ (C.lines C.=$ C.fold insertTrxLocalLine emptyTrxMap)
 
 toParsTrxMap :: TrxMap -> ParsMap
 toParsTrxMap tm = runIdentity $ M.traverseWithKey trxToPars (trxTrx tm)
@@ -83,7 +84,7 @@ readParsLocalMap :: FilePath -> IO ParsMap
 readParsLocalMap = liftM toParsTrxMap . readTrxLocalMap
 
 readParsScoreMap :: FilePath -> IO ScoreMap
-readParsScoreMap f = C.runResourceT $ C.sourceFile f C.$$ (C.lines C.=$ C.fold insertScore M.empty)
+readParsScoreMap f = R.runResourceT $ C.sourceFile f C.$$ (C.lines C.=$ C.fold insertScore M.empty)
   where insertScore sc0 l = case BS.split '\t' l of
           [ geneid, _len, scoresbs ] -> let !scores = U.fromList . map parseScore . BS.split ';' $ scoresbs
                                             parseScore = either error id . AP.parseOnly AP.double
