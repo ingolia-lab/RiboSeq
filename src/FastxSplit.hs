@@ -1,14 +1,17 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE Rank2Types #-}
 module Main
   where
 
 import Control.Applicative
 import Control.Monad
+import Control.Monad.IO.Class
 import qualified Data.ByteString.Char8 as BS
 import Data.Char
 import qualified Data.HashMap.Strict as HM
+import Data.List
 import Data.Maybe
 import Numeric
 import System.Exit
@@ -34,25 +37,32 @@ main = run ( fxs, info )
 fastxSplit :: Conf -> IO ()
 fastxSplit conf = return ()
 
--- genomeToTrx :: String -> String -> Maybe String -> Conf -> IO ()
--- genomeToTrx trx input moutput conf
---   = do trxs <- liftM (LM.transcriptSeqLocMap 100000) $ Bed.readBedTranscripts trx
---        R.runResourceT $ CB.sourceFile input C.$= remapCoordLines trxs conf C.$$ CB.sinkFile output
---   where output = fromMaybe defaultOutput moutput
---         defaultOutput = let (base, ext) = splitExtension input
---                         in (base ++ "_trx") <.> ext
+inputs :: Term [FilePath]
+inputs = nonEmpty $ posAny [] (posInfo { posName = "INPUT", posDoc = "FastQ input" })
 
-inputSource :: Term [FilePath]
-inputSource = nonEmpty $ posAny [] (posInfo { posName = "INPUT", posDoc = "FastQ input" })
+inputSource :: (MonadIO m, R.MonadResource m) => [FilePath] -> C.Producer m BS.ByteString
+inputSource []    = fail "No input files"
+inputSource ["-"] = CB.sourceHandle stdin
+inputSource fs@(_:_) = foldl1' (*>) (map CB.sourceFile fs)
 
-
-
-data Conf = Conf { cInputSource :: ![FilePath]
+data Conf = Conf { cInputs :: ![FilePath],
+                   cOutDir :: !FilePath,
+                   cMinInsert :: !Int
                  } deriving (Read, Show)
 
 argConf :: Term Conf
 argConf = Conf <$>
-          inputSource
+          inputs <*>
+          outDir <*>
+          minInsert
+
+outDir :: Term FilePath
+outDir = required $ opt Nothing $ (optInfo [ "o", "output-dir" ])
+         { optName = "OUTPUT-DIR", optDoc = "Output directory name" }
+
+minInsert :: Term Int
+minInsert = value $ opt 0 $ (optInfo [ "m", "min-insert" ])
+            { optName = "MIN-INSERT", optDoc = "Minimum insert length" }
 
 -- trxBed :: Term String
 -- trxBed = required $ opt Nothing $ (optInfo [ "t", "transcripts" ])
