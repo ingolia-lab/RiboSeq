@@ -26,7 +26,7 @@ Library
 Executable fastx-split
   Main-is:             FastxSplit.hs
   Build-depends:       base >= 4.2 && < 5, bytestring,
-                       attoparsec >= 0.8.5, hashable, unordered-containers,
+                       attoparsec >= 0.8.5, hashable, unordered-containers, directory,
                        iteratee >= 0.8.1, seqloc < 0.6, biocore >= 0.2, transformers,
                        conduit, conduit-extra, vector, filepath, resourcet, cmdtheline
   Hs-Source-Dirs:      src
