@@ -46,8 +46,8 @@ fastxSplit conf = do createDirectory $ cOutDir conf
                      sspecs <- readSampleSheet conf
                      R.runResourceT $
                        do samples <- mapM (mkSample conf) sspecs
-                          smap <- indexSampleMap conf samples
-                          inputSource (cInputs conf) C.$$ writeSamples smap
+                          sfate <- sampleFate conf samples
+                          inputSource (cInputs conf) C.$$ writeSamples conf sfate
                           writeStats samples
 
 inputs :: Term [FilePath]
@@ -59,33 +59,46 @@ inputSource ["-"] = CB.sourceHandle stdin
 inputSource fs@(_:_) | "-" `elem` fs = fail "Cannot interleave stdin with files"
                      | otherwise = foldl1' (*>) (map CB.sourceFile fs)
 
-writeSamples :: (MonadIO m, R.MonadResource m) => (HM.HashMap BS.ByteString (Sample m)) -> C.Sink BS.ByteString m ()
-writeSamples _ = return ()
+writeSamples :: (MonadIO m, R.MonadResource m) => Conf -> SampleFate -> C.Sink BS.ByteString m ()
+writeSamples conf sfate = toFastQ C.$= C.mapM_ (liftIO . handleSeq conf sfate)
 
-writeStats :: (MonadIO m) => [Sample m] -> m ()
+writeStats :: (MonadIO m) => [Sample] -> m ()
 writeStats _ = return ()
 
---toFastQ :: (Monad m) => C.Conduit BS.ByteString m FastQ
---toFastQ = CB.lines $= 
+toFastQ :: (Monad m) => C.Conduit BS.ByteString m FastQ
+toFastQ = CB.lines C.$= fqloop
+  where fqloop = C.peek >>= \mnext -> case mnext of
+          Nothing -> return ()
+          Just _ -> C.take 4 >>= \ls -> case ls of
+            [lname, lsequ, _l, lqual] -> let !fq' = FQ { fqname = BS.drop 1 lname, fqseq = lsequ, fqqual = lqual }
+                                         in C.yield fq' >> fqloop
+            _ -> fail $ "Partial FastQ: " ++ show ls
 
-foobar conf sfate fq = do
+handleSeq :: Conf -> SampleFate -> FastQ -> IO ()          
+handleSeq conf sfate fq = do
   modifyIORef' (sfCount sfate) succ
-  case sequLinkers (cLinkerFormat conf) (fqseq fq) of
+  case sequLinkers (cLinkerFormat conf) fq of
     TooShort -> tooShort
     res -> case HM.lookup (sequIndex res) (sfMap sfate) of
       Nothing -> unknown res
       Just s -> sample res s
   where tooShort = do modifyIORef' (sfShortCount sfate) succ
-                      maybe (return ()) (toDest conf fq) $ sfShort sfate
+                      maybe (return ()) (\h -> hWriteFq h fq) $ sfShort sfate
         unknown res = do modifyIORef' (sfUnknownCount sfate) succ
                          maybe (return ()) (sample res) $ sfUnknown sfate
-        sample res s = handleSeq conf s res
+        sample res s = seqToSample conf s fq res
 
-handleSeq conf s res = 
-
-toDest conf fq dest = undefined
+seqToSample :: Conf -> Sample -> FastQ -> LinkerRes -> IO ()
+seqToSample _conf s fq0 res = hWriteFq (sHandle s) fq'
+  where fq' = FQ { fqname = BS.unwords [ fqname fq0, sequIndex res, sequBarcode res ]
+                 , fqseq  = sequEnce res
+                 , fqqual = sequQual res
+                 }
 
 data FastQ = FQ { fqname, fqseq, fqqual :: !BS.ByteString } deriving (Show, Read)
+
+hWriteFq :: Handle -> FastQ -> IO ()
+hWriteFq h fq = BS.hPutStr h $ BS.unlines [ '@' `BS.cons` fqname fq, fqseq fq, "+", fqqual fq ]
 
 readSampleSheet :: (MonadIO m) => Conf -> m [SampleSpec]
 readSampleSheet conf = (liftIO . BS.readFile . cSampleSheet $ conf) >>= parseSampleSheet conf
@@ -98,15 +111,31 @@ parseSampleSheet conf ss = zipWithM parseSampleSpec (BS.lines ss) ([1..] :: [Int
                                             | otherwise -> fail $ "Index " ++ show idx ++ " not of length " ++ show idxlen ++ " in " ++ show l ++ " line #" ++ show lno
                                  _ -> fail $ "Bad sample spec " ++ show l ++ " line #" ++ show lno
 
-mkSample :: (MonadIO m, R.MonadResource m) => Conf -> SampleSpec -> m (Sample m)
-mkSample conf ss = Sample ss (CB.sinkFile $ sampleOutFile conf ss) <$>
+mkSample :: (R.MonadResource m, MonadIO m) => Conf -> SampleSpec -> m Sample
+mkSample conf ss = Sample ss <$>
+                   allocateFileHandle (sampleOutFile conf ss) WriteMode <*>
                    (liftIO $ UM.replicate (sampleIndexIdxlen . cLinkerFormat $ conf) 0) <*>
                    (liftIO $ UM.replicate (seqBarcodeIdxlen . cLinkerFormat $ conf) 0)
 
 sampleOutFile :: Conf -> SampleSpec -> FilePath
 sampleOutFile conf ss = (cOutDir conf) </> ((BS.unpack . sName $ ss) ++ ".fastq")
 
-indexSampleMap :: (MonadIO m) => Conf -> [Sample m] -> m (HM.HashMap BS.ByteString (Sample m))
+tooShortFile :: Conf -> FilePath
+tooShortFile conf = (cOutDir conf) </> "tooshort.fastq"
+
+sampleFate :: (MonadIO m, R.MonadResource m) => Conf -> [Sample] -> m SampleFate
+sampleFate conf samples = Fate <$>
+                          indexSampleMap conf samples <*>
+                          (Just <$> mkSample conf unknownSpec) <*>
+                          liftIO (newIORef 0) <*>
+                          (Just <$> allocateFileHandle (tooShortFile conf) WriteMode) <*>
+                          liftIO (newIORef 0) <*>
+                          liftIO (newIORef 0)
+  where unknownSpec = SampleSpec { sName = "UnknownIndex",
+                                   sIndex = BS.replicate (sampleIndexIdxlen . cLinkerFormat $ conf) 'N'
+                                 }
+
+indexSampleMap :: (MonadIO m) => Conf -> [Sample] -> m (HM.HashMap BS.ByteString Sample)
 indexSampleMap conf = foldl' insertSample (return HM.empty)
   where insertSample iohm0 s = do hm' <- iohm0 >>= \hm0 -> insertPerfect hm0 s
                                   if cPerfectOnly conf
@@ -126,13 +155,13 @@ indexSampleMap conf = foldl' insertSample (return HM.empty)
                               Nothing -> return $! HM.insert mmidx s hmin
                               Just t -> fail $ "Index clash " ++ show (sSpec s) ++ " and " ++ show (sSpec t) ++ " for index " ++ show mmidx
 
-data SampleFate m = Fate { sfMap :: !(HM.HashMap BS.ByteString (Sample m))
-                         , sfUnknown :: !(Maybe (Sample m))
-                         , sfUnknownCount :: !(IORef Int)
-                         , sfShort ::  !(Maybe Handle)
-                         , sfShortCount :: !(IORef Int)
-                         , sfCount :: !(IORef Int)
-                         }
+data SampleFate = Fate { sfMap :: !(HM.HashMap BS.ByteString Sample)
+                       , sfUnknown :: !(Maybe Sample)
+                       , sfUnknownCount :: !(IORef Int)
+                       , sfShort ::  !(Maybe Handle)
+                       , sfShortCount :: !(IORef Int)
+                       , sfCount :: !(IORef Int)
+                       }
 
 newtype Index = Index { unIndex :: Int } deriving (Show, Read, Eq, Ord, Num)
 
@@ -165,13 +194,13 @@ lenIndex len = 4 ^ len
 
 data SampleSpec = SampleSpec { sName :: !BS.ByteString, sIndex :: !BS.ByteString } deriving (Show, Read)
 
-data Sample m = Sample { sSpec :: !SampleSpec,
-                         sSink :: !(C.Consumer BS.ByteString m ()),
-                         sIndexes :: !(UM.IOVector Int), 
-                         sBarcodes :: !(UM.IOVector Int)
-                       }
+data Sample = Sample { sSpec :: !SampleSpec,
+                       sHandle :: !Handle,
+                       sIndexes :: !(UM.IOVector Int), 
+                       sBarcodes :: !(UM.IOVector Int)
+                     }
                 
-ssIndex :: Sample m -> BS.ByteString
+ssIndex :: Sample -> BS.ByteString
 ssIndex = sIndex . sSpec
 
 data Conf = Conf { cInputs :: ![FilePath],
@@ -196,16 +225,19 @@ sampleIndexIdxlen :: LinkerFormat -> Int
 sampleIndexIdxlen = lenIndex . length . sampleIndex
 
 data LinkerRes = TooShort
-               | Res { sequEnce, sequIndex, sequBarcode :: !BS.ByteString }
+               | Res { sequEnce, sequIndex, sequBarcode, sequQual :: !BS.ByteString }
                deriving (Show, Read)
 
-sequLinkers :: LinkerFormat -> BS.ByteString -> LinkerRes
-sequLinkers lfmt sequ | BS.length sequ < (prefixLength lfmt + suffixLength lfmt) = TooShort
-                      | otherwise = let (pfx, rest) = BS.splitAt (prefixLength lfmt) sequ
-                                        (ence, sfx) = BS.splitAt (BS.length rest - suffixLength lfmt) rest
+sequLinkers :: LinkerFormat -> FastQ -> LinkerRes
+sequLinkers lfmt fq | BS.length (fqseq fq) < (prefixLength lfmt + suffixLength lfmt) = TooShort
+                    | otherwise = let (pfx, rest) = BS.splitAt (prefixLength lfmt) $ fqseq fq
+                                      (ence, sfx) = BS.splitAt (BS.length rest - suffixLength lfmt) rest
+                                      qual = BS.take (BS.length ence) . BS.drop (prefixLength lfmt) $ fqqual fq
                                     in Res { sequEnce = ence
                                            , sequIndex = unlinkerize pfx sfx $ sampleIndex lfmt
-                                           , sequBarcode = unlinkerize pfx sfx $ seqBarcode lfmt }
+                                           , sequBarcode = unlinkerize pfx sfx $ seqBarcode lfmt
+                                           , sequQual = qual
+                                           }
                                        
 unlinkerize :: BS.ByteString -> BS.ByteString -> [FormatNt] -> BS.ByteString
 unlinkerize pfx sfx = BS.pack . map unlinkerChar
@@ -263,3 +295,6 @@ sampleSheet = required $ opt Nothing $ (optInfo [ "s", "sample-shet" ])
                    
 warn :: (MonadIO m) => String -> m ()                        
 warn = liftIO . hPutStrLn stderr
+
+allocateFileHandle :: (R.MonadResource m) => FilePath -> IOMode -> m Handle
+allocateFileHandle filename filemode = liftM snd $ R.allocate (openFile filename filemode) hClose
