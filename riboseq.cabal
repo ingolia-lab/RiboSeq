@@ -25,6 +25,7 @@ Library
 
 Executable fastx-split
   Main-is:             FastxSplit.hs
+  Other-modules:       Bio.RiboSeq.LinkerSeqs
   Build-depends:       base >= 4.2 && < 5, bytestring,
                        attoparsec >= 0.8.5, hashable, unordered-containers, directory,
                        iteratee >= 0.8.1, seqloc < 0.6, biocore >= 0.2, transformers,
