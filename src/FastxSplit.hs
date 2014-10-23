@@ -14,6 +14,7 @@ import qualified Data.ByteString.Char8 as BS
 import Data.Char
 import Data.Either
 import qualified Data.HashMap.Strict as HM
+import Data.IORef
 import Data.List
 import Data.Maybe
 import Numeric
@@ -67,12 +68,22 @@ writeStats _ = return ()
 --toFastQ :: (Monad m) => C.Conduit BS.ByteString m FastQ
 --toFastQ = CB.lines $= 
 
-foobar conf smap fq = case sequLinkers (cLinkerFormat conf) (fqseq fq) of
-                       TooShort -> tooShort
-                       res -> case HM.lookup (sequIndex res) smap of
-                               Nothing -> unknown
-                               Just s -> 
-                          
+foobar conf sfate fq = do
+  modifyIORef' (sfCount sfate) succ
+  case sequLinkers (cLinkerFormat conf) (fqseq fq) of
+    TooShort -> tooShort
+    res -> case HM.lookup (sequIndex res) (sfMap sfate) of
+      Nothing -> unknown res
+      Just s -> sample res s
+  where tooShort = do modifyIORef' (sfShortCount sfate) succ
+                      maybe (return ()) (toDest conf fq) $ sfShort sfate
+        unknown res = do modifyIORef' (sfUnknownCount sfate) succ
+                         maybe (return ()) (sample res) $ sfUnknown sfate
+        sample res s = handleSeq conf s res
+
+handleSeq conf s res = 
+
+toDest conf fq dest = undefined
 
 data FastQ = FQ { fqname, fqseq, fqqual :: !BS.ByteString } deriving (Show, Read)
 
@@ -114,6 +125,14 @@ indexSampleMap conf = foldl' insertSample (return HM.empty)
                     \hmin -> case HM.lookup mmidx hmin of
                               Nothing -> return $! HM.insert mmidx s hmin
                               Just t -> fail $ "Index clash " ++ show (sSpec s) ++ " and " ++ show (sSpec t) ++ " for index " ++ show mmidx
+
+data SampleFate m = Fate { sfMap :: !(HM.HashMap BS.ByteString (Sample m))
+                         , sfUnknown :: !(Maybe (Sample m))
+                         , sfUnknownCount :: !(IORef Int)
+                         , sfShort ::  !(Maybe Handle)
+                         , sfShortCount :: !(IORef Int)
+                         , sfCount :: !(IORef Int)
+                         }
 
 newtype Index = Index { unIndex :: Int } deriving (Show, Read, Eq, Ord, Num)
 
