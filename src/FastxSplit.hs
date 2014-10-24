@@ -99,10 +99,9 @@ seqToSample :: Conf -> Sample -> FastQ -> LinkerRes -> IO ()
 seqToSample _conf s fq0 res = do hWriteFq (sHandle s) fq'
                                  countSeq (sIndexes s) (sequIndex res)
                                  countSeq (sBarcodes s) (sequBarcode res)
-                                 
   where fq' = FQ { fqname = fqname', fqseq = sequEnce res, fqqual = sequQual res }
         names = BS.words $ fqname fq0
-        fqname' = BS.unwords [ BS.concat [ fqname fq0, "#", sequBarcode res ], index' ]
+        fqname' = BS.unwords $ [ BS.concat [ head names, "#", sequBarcode res ] ] ++ tail names ++ [ index' ]
         index' = BS.intercalate ":" [ sequIndex res, BS.pack . show $ nmismatch, ssIndex s ]
         nmismatch = sum $ BS.zipWith (\ch1 ch2 -> if ch1 == ch2 then 0 else 1) (sequIndex res) (ssIndex s)
 
