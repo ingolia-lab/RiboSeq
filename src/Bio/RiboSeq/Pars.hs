@@ -100,7 +100,7 @@ parsStatTable trxmap scoremap = BS.unlines $ header : mapMaybe statLine geneIDs
                              case fromIntegral . fst . Loc.bounds $ cds of
                                start | start > 0 -> Just $! statUtr5 trx score start
                                      | otherwise -> Nothing
-        header = BS.intercalate "\t" [ "# YORF", "Length", "Total", "Avg", "First30", "Start30", "Max30Pos", "Max30" ]
+        header = BS.intercalate "\t" [ "# YORF", "Length", "Total", "Avg", "First30", "Start30", "Max30Pos", "Max30", "Plus15", "Plus30", "Plus45", "Plus60", "Plus75" ]
         statUtr5 :: ParsTrx -> U.Vector Double -> Int -> BS.ByteString
         statUtr5 trx score start = BS.intercalate "\t" fields
           where fields = [ unSeqLabel . ptrxName $ trx
@@ -111,6 +111,11 @@ parsStatTable trxmap scoremap = BS.unlines $ header : mapMaybe statLine geneIDs
                          , start30
                          , maybe "N/A" (BS.pack . show . negate) max30off
                          , maybe "N/A" (showf . window30) max30off
+                         , plus 15                         
+                         , plus 30
+                         , plus 45
+                         , plus 60
+                         , plus 75
                          ]
                 showf x = BS.pack $ showFFloat (Just 2) x ""
                 len = fromIntegral $ 1 + start
@@ -119,6 +124,11 @@ parsStatTable trxmap scoremap = BS.unlines $ header : mapMaybe statLine geneIDs
                         | otherwise = showf . U.sum . U.take 30 $ score
                 start30 | start >= 15 && U.length score > start + 15 = showf . U.sum . U.take 30 . U.drop (start - 15) $ score
                         | otherwise = "N/A"
+                plus ctr = let beginning = start + ctr - 14
+                               ending = start + ctr + 15
+                           in if beginning >= 0 && U.length score > ending
+                              then showf . U.sum . U.take 30 . U.drop beginning $ score
+                              else "N/A"
                 max30off | start >= 18 = Just $ maximumBy (comparing window30) [18..start]
                          | otherwise = Nothing
                 window30 i = U.sum . U.take 30 . U.drop (start - i) $ score
