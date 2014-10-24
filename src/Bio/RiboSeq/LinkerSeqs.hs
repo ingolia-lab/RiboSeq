@@ -13,11 +13,24 @@ import Data.List
 import qualified Data.Vector.Unboxed.Mutable as UM
 import System.IO
 
+import qualified Data.Conduit as C
+import qualified Data.Conduit.Binary as CB
+import qualified Data.Conduit.List as C
+
 --
 data FastQ = FQ { fqname, fqseq, fqqual :: !BS.ByteString } deriving (Show, Read)
 
 hWriteFq :: Handle -> FastQ -> IO ()
 hWriteFq h fq = BS.hPutStr h $ BS.unlines [ '@' `BS.cons` fqname fq, fqseq fq, "+", fqqual fq ]
+
+toFastQ :: (Monad m) => C.Conduit BS.ByteString m FastQ
+toFastQ = CB.lines C.$= fqloop
+  where fqloop = C.peek >>= \mnext -> case mnext of
+          Nothing -> return ()
+          Just _ -> C.take 4 >>= \ls -> case ls of
+            [lname, lsequ, _l, lqual] -> let !fq' = FQ { fqname = BS.drop 1 lname, fqseq = lsequ, fqqual = lqual }
+                                         in C.yield fq' >> fqloop
+            _ -> fail $ "Partial FastQ: " ++ show ls
 
 --
 data FormatNt = Prefix !Int | Suffix !Int deriving (Show, Read, Eq)

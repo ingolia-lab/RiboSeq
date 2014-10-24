@@ -50,7 +50,8 @@ fastxSplit conf = do createDirectory $ cOutDir conf
                        do samples <- mapM (mkSample conf) sspecs
                           sfate <- sampleFate conf samples
                           inputSource (cInputs conf) C.$$ writeSamples conf sfate
-                          mapM_ (writeStats conf) samples
+                          mapM_ (writeSampleStats conf) $ sfSamples sfate
+                          writeFates conf sfate
 
 inputs :: Term [FilePath]
 inputs = nonEmpty $ posAny [] (posInfo { posName = "INPUT", posDoc = "FastQ input" })
@@ -64,21 +65,21 @@ inputSource fs@(_:_) | "-" `elem` fs = fail "Cannot interleave stdin with files"
 writeSamples :: (MonadIO m, R.MonadResource m) => Conf -> SampleFate -> C.Sink BS.ByteString m ()
 writeSamples conf sfate = toFastQ C.$= C.mapM_ (liftIO . handleSeq conf sfate)
 
-writeStats :: (MonadIO m) => Conf -> Sample -> m ()
-writeStats conf s = liftIO $ U.freeze (sBarcodes s) >>= BS.writeFile (sampleStatsFile conf $ sSpec s) . statsTable
+writeSampleStats :: (MonadIO m) => Conf -> Sample -> m ()
+writeSampleStats conf s = liftIO $ U.freeze (sBarcodes s) >>= BS.writeFile (sampleStatsFile conf $ sSpec s) . statsTable
   where bcdlen = length . seqBarcode $ cLinkerFormat conf
         statsTable bcds = BS.unlines $! map statLine [0..(maxIndex bcdlen)]
           where statLine idx = let bcd = fromIndex bcdlen idx
                                in BS.intercalate "\t" $ bcd : (BS.pack . show $ bcds U.! unIndex idx) : (map BS.singleton . BS.unpack $ bcd)
 
-toFastQ :: (Monad m) => C.Conduit BS.ByteString m FastQ
-toFastQ = CB.lines C.$= fqloop
-  where fqloop = C.peek >>= \mnext -> case mnext of
-          Nothing -> return ()
-          Just _ -> C.take 4 >>= \ls -> case ls of
-            [lname, lsequ, _l, lqual] -> let !fq' = FQ { fqname = BS.drop 1 lname, fqseq = lsequ, fqqual = lqual }
-                                         in C.yield fq' >> fqloop
-            _ -> fail $ "Partial FastQ: " ++ show ls
+writeFates :: (MonadIO m) => Conf -> SampleFate -> m ()
+writeFates conf sf = liftIO $ fateTable >>= BS.writeFile (sampleFateFile conf)
+  where fateTable = do total <- readIORef (sfCount sf)
+                       ls <- (forM (sfSamples sf) (\s -> fateLine total (sSpec s) <$> readIORef (sCount s)))
+                       l <- (fateLine total (SampleSpec "short" "N/A") <$> readIORef (sfShortCount sf))
+                       return $ BS.unlines $ ls ++ [l]
+        fateLine total (SampleSpec name index) count =
+          BS.intercalate "\t" [ name, index, BS.pack $ show count, BS.pack $ showFFloat (Just 2) (100.0 * fromIntegral count / fromIntegral total) "%" ]
 
 handleSeq :: Conf -> SampleFate -> FastQ -> IO ()          
 handleSeq conf sfate fq = do
@@ -90,9 +91,9 @@ handleSeq conf sfate fq = do
       Just s -> sample res s
   where tooShort = do modifyIORef' (sfShortCount sfate) succ
                       maybe (return ()) (\h -> hWriteFq h fq) $ sfShort sfate
-        unknown res = do modifyIORef' (sfUnknownCount sfate) succ
-                         maybe (return ()) (sample res) $ sfUnknown sfate
-        sample res s = seqToSample conf s fq res
+        unknown res = maybe (return ()) (sample res) $ sfUnknown sfate
+        sample res s = do modifyIORef' (sCount s) succ 
+                          seqToSample conf s fq res
 
 seqToSample :: Conf -> Sample -> FastQ -> LinkerRes -> IO ()
 seqToSample _conf s fq0 res = do hWriteFq (sHandle s) fq'
@@ -117,31 +118,37 @@ parseSampleSheet conf ss = zipWithM parseSampleSpec (BS.lines ss) ([1..] :: [Int
                                             | otherwise -> fail $ "Index " ++ show idx ++ " not of length " ++ show idxlen ++ " in " ++ show l ++ " line #" ++ show lno
                                  _ -> fail $ "Bad sample spec " ++ show l ++ " line #" ++ show lno
 
-mkSample :: (R.MonadResource m, MonadIO m) => Conf -> SampleSpec -> m Sample
-mkSample conf ss = Sample ss <$>
-                   allocateFileHandle (sampleOutFile conf ss) WriteMode <*>
-                   (liftIO $ UM.replicate (sampleIndexIdxlen . cLinkerFormat $ conf) 0) <*>
-                   (liftIO $ UM.replicate (seqBarcodeIdxlen . cLinkerFormat $ conf) 0)
-
 sampleOutFile :: Conf -> SampleSpec -> FilePath
 sampleOutFile conf ss = (cOutDir conf) </> ((BS.unpack . sName $ ss) ++ ".fastq")
-
-sampleStatsFile :: Conf -> SampleSpec -> FilePath
-sampleStatsFile conf ss = (cOutDir conf) </> ((BS.unpack . sName $ ss) ++ "_stats.fastq")
 
 tooShortFile :: Conf -> FilePath
 tooShortFile conf = (cOutDir conf) </> "tooshort.fastq"
 
+sampleStatsFile :: Conf -> SampleSpec -> FilePath
+sampleStatsFile conf ss = (cOutDir conf) </> ((BS.unpack . sName $ ss) ++ "_stats.txt")
+
+sampleFateFile :: Conf -> FilePath
+sampleFateFile conf = (cOutDir conf) </> "fates.txt"
+
+data SampleFate = Fate { sfMap :: !(HM.HashMap BS.ByteString Sample)
+                       , sfSamples :: ![Sample]
+                       , sfUnknown :: !(Maybe Sample)
+                       , sfShort ::  !(Maybe Handle)
+                       , sfShortCount :: !(IORef Int)
+                       , sfCount :: !(IORef Int)
+                       }
+
 sampleFate :: (MonadIO m, R.MonadResource m) => Conf -> [Sample] -> m SampleFate
-sampleFate conf samples = Fate <$>
-                          indexSampleMap conf samples <*>
-                          (Just <$> mkSample conf unknownSpec) <*>
-                          liftIO (newIORef 0) <*>
-                          (Just <$> allocateFileHandle (tooShortFile conf) WriteMode) <*>
-                          liftIO (newIORef 0) <*>
-                          liftIO (newIORef 0)
+sampleFate conf samples = do unknown <- mkSample conf unknownSpec
+                             Fate <$>
+                               indexSampleMap conf samples <*>
+                               pure (unknown : samples) <*>
+                               (pure $ Just unknown) <*>
+                               (Just <$> allocateFileHandle (tooShortFile conf) WriteMode) <*>
+                               liftIO (newIORef 0) <*>
+                               liftIO (newIORef 0)
   where unknownSpec = SampleSpec { sName = "UnknownIndex",
-                                   sIndex = BS.replicate (sampleIndexIdxlen . cLinkerFormat $ conf) 'N'
+                                   sIndex = BS.replicate (length . sampleIndex . cLinkerFormat $ conf) 'N'
                                  }
 
 indexSampleMap :: (MonadIO m) => Conf -> [Sample] -> m (HM.HashMap BS.ByteString Sample)
@@ -164,22 +171,22 @@ indexSampleMap conf = foldl' insertSample (return HM.empty)
                               Nothing -> return $! HM.insert mmidx s hmin
                               Just t -> fail $ "Index clash " ++ show (sSpec s) ++ " and " ++ show (sSpec t) ++ " for index " ++ show mmidx
 
-data SampleFate = Fate { sfMap :: !(HM.HashMap BS.ByteString Sample)
-                       , sfUnknown :: !(Maybe Sample)
-                       , sfUnknownCount :: !(IORef Int)
-                       , sfShort ::  !(Maybe Handle)
-                       , sfShortCount :: !(IORef Int)
-                       , sfCount :: !(IORef Int)
-                       }
-
 data SampleSpec = SampleSpec { sName :: !BS.ByteString, sIndex :: !BS.ByteString } deriving (Show, Read)
 
 data Sample = Sample { sSpec :: !SampleSpec,
                        sHandle :: !Handle,
                        sIndexes :: !(UM.IOVector Int), 
-                       sBarcodes :: !(UM.IOVector Int)
+                       sBarcodes :: !(UM.IOVector Int),
+                       sCount :: !(IORef Int)
                      }
                 
+mkSample :: (R.MonadResource m, MonadIO m) => Conf -> SampleSpec -> m Sample
+mkSample conf ss = Sample ss <$>
+                   allocateFileHandle (sampleOutFile conf ss) WriteMode <*>
+                   (liftIO $ UM.replicate (sampleIndexIdxlen . cLinkerFormat $ conf) 0) <*>
+                   (liftIO $ UM.replicate (seqBarcodeIdxlen . cLinkerFormat $ conf) 0) <*>
+                   (liftIO $ newIORef 0)
+
 ssIndex :: Sample -> BS.ByteString
 ssIndex = sIndex . sSpec
 
