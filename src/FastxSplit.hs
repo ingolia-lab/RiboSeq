@@ -50,7 +50,7 @@ fastxSplit conf = do createDirectory $ cOutDir conf
                        do samples <- mapM (mkSample conf) sspecs
                           sfate <- sampleFate conf samples
                           inputSource (cInputs conf) C.$$ writeSamples conf sfate
-                          writeStats samples
+                          mapM_ (writeStats conf) samples
 
 inputs :: Term [FilePath]
 inputs = nonEmpty $ posAny [] (posInfo { posName = "INPUT", posDoc = "FastQ input" })
@@ -64,8 +64,12 @@ inputSource fs@(_:_) | "-" `elem` fs = fail "Cannot interleave stdin with files"
 writeSamples :: (MonadIO m, R.MonadResource m) => Conf -> SampleFate -> C.Sink BS.ByteString m ()
 writeSamples conf sfate = toFastQ C.$= C.mapM_ (liftIO . handleSeq conf sfate)
 
-writeStats :: (MonadIO m) => [Sample] -> m ()
-writeStats _ = return ()
+writeStats :: (MonadIO m) => Conf -> Sample -> m ()
+writeStats conf s = liftIO $ U.freeze (sBarcodes s) >>= BS.writeFile (sampleStatsFile conf $ sSpec s) . statsTable
+  where bcdlen = length . seqBarcode $ cLinkerFormat conf
+        statsTable bcds = BS.unlines $! map statLine [0..(maxIndex bcdlen)]
+          where statLine idx = let bcd = fromIndex bcdlen idx
+                               in BS.intercalate "\t" $ bcd : (BS.pack . show $ bcds U.! unIndex idx) : (map BS.singleton . BS.unpack $ bcd)
 
 toFastQ :: (Monad m) => C.Conduit BS.ByteString m FastQ
 toFastQ = CB.lines C.$= fqloop
@@ -95,10 +99,12 @@ seqToSample _conf s fq0 res = do hWriteFq (sHandle s) fq'
                                  countSeq (sIndexes s) (sequIndex res)
                                  countSeq (sBarcodes s) (sequBarcode res)
                                  
-  where fq' = FQ { fqname = BS.unwords [ fqname fq0, sequIndex res, sequBarcode res ]
+  where fq' = FQ { fqname = BS.unwords [ fqname fq0, index', sequBarcode res ]
                  , fqseq  = sequEnce res
                  , fqqual = sequQual res
                  }
+        index' = BS.intercalate ":" [ sequIndex res, BS.pack . show $ nmismatch, ssIndex s ]
+        nmismatch = sum $ BS.zipWith (\ch1 ch2 -> if ch1 == ch2 then 0 else 1) (sequIndex res) (ssIndex s)
 
 readSampleSheet :: (MonadIO m) => Conf -> m [SampleSpec]
 readSampleSheet conf = (liftIO . BS.readFile . cSampleSheet $ conf) >>= parseSampleSheet conf
@@ -119,6 +125,9 @@ mkSample conf ss = Sample ss <$>
 
 sampleOutFile :: Conf -> SampleSpec -> FilePath
 sampleOutFile conf ss = (cOutDir conf) </> ((BS.unpack . sName $ ss) ++ ".fastq")
+
+sampleStatsFile :: Conf -> SampleSpec -> FilePath
+sampleStatsFile conf ss = (cOutDir conf) </> ((BS.unpack . sName $ ss) ++ "_stats.fastq")
 
 tooShortFile :: Conf -> FilePath
 tooShortFile conf = (cOutDir conf) </> "tooshort.fastq"

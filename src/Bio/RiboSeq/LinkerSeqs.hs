@@ -72,7 +72,7 @@ unlinkerize pfx sfx = BS.pack . map unlinkerChar
         unlinkerChar (Suffix i) = sfx `BS.index` i
 
 --
-newtype Index = Index { unIndex :: Int } deriving (Show, Read, Eq, Ord, Num)
+newtype Index = Index { unIndex :: Int } deriving (Show, Read, Eq, Ord, Num, Integral, Real, Enum)
 
 mismatches :: BS.ByteString -> [BS.ByteString]
 mismatches s = concatMap mmat [0..(BS.length s - 1)]
@@ -94,6 +94,21 @@ toIndex = BS.foldl' idxch 0
                                   'T' -> 3
                                   _ -> error $ "toIndex: Bad nucleotide " ++ show ch
                       in i' + ich
+
+fromIndex :: Int -> Index -> BS.ByteString
+fromIndex len idx = BS.reverse $! BS.unfoldr go (len, idx)
+  where go :: (Int, Index) -> Maybe (Char, (Int, Index))
+        go (0, rest) | rest == 0 = Nothing
+                     | otherwise = error $ "fromIndex: Residual " ++ show rest ++ " from " ++ show (len, idx)
+        go (l, x) = let (x', ch) = x `divMod` 4
+                    in Just (case ch of
+                              0 -> 'A'
+                              1 -> 'C'
+                              2 -> 'G'
+                              3 -> 'T'
+                              _ -> error $ "fromIndex: Bad result " ++ show (x', ch) ++ " from " ++ show x ++ " divMod 4"
+                             , ((l - 1), x'))
+                        
 
 maxIndex :: Int -> Index
 maxIndex len = (4 ^ len) - 1
