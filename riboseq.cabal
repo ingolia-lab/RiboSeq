@@ -206,3 +206,8 @@ Executable quant-table
   Hs-Source-Dirs:      src
   Ghc-Options:         -auto-all -O2 -Wall
 
+Executable subset-mw
+  Main-is:             SubsetMannWhitney.hs
+  Build-depends:       base, bytestring, attoparsec, cmdtheline, statistics,
+                       monads-tf, unordered-containers, vector
+  Hs-Source-Dirs:      src
