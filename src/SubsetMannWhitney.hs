@@ -43,7 +43,7 @@ subsetMannWhitney conf = do
            
 subsetReport :: Conf -> V.Vector Stat -> V.Vector FdrEst -> BS.ByteString
 subsetReport _conf stats fdrs = BS.unlines $ header : subsetLines
-  where header = BS.intercalate "\t" [ "# GO", "MedDiff", "MedIn", "MedOut", "p", "q", "NumIn" ]
+  where header = BS.intercalate "\t" [ "# GO", "MedDiff", "MedIn", "MedOut", "p", "q", "-log10(q)", "NumIn" ]
         subsetLines = V.toList $ V.zipWith subsetLine stats fdrs
         subsetLine stat fdr = BS.pack . intercalate "\t" $
                               [ BS.unpack . sName . sSubset $ stat
@@ -52,7 +52,9 @@ subsetReport _conf stats fdrs = BS.unlines $ header : subsetLines
                               , showFFloat (Just 2) (sMedOut stat) ""
                               , showEFloat (Just 1) (estP fdr) ""
                               , showEFloat (Just 1) (estQ fdr) ""
+                              , showFFloat (Just 1) (negate . logBase 10 . estQ $ fdr) ""
                               , show . HS.size . sKeys . sSubset $ stat
+                              , BS.unpack . sRest . sSubset $ stat
                               ]
 
 fdrTrialReport :: Conf -> [FdrTrial] -> BS.ByteString
@@ -127,13 +129,14 @@ partitionData isin dats = (tovec dvin, tovec dvout)
 
 data Subset = Subset { sName :: !BS.ByteString
                      , sKeys :: !(HS.HashSet BS.ByteString)
+                     , sRest :: !BS.ByteString
                      } deriving (Show)
 
 readSubsets :: Conf -> IO [Subset]
 readSubsets conf = (BS.readFile . cSubsetFile $ conf) >>= parseSubsets
   where parseSubsets = mapM parseSubset . BS.lines
         parseSubset l = case BS.split '\t' l of
-          (key:vals@(_:_)) -> return $! Subset key (HS.fromList vals)
+          (key:vals:rest) -> return $! Subset key (HS.fromList . BS.split ',' $ vals) (BS.intercalate "\t" rest)
           _ -> ioError . userError $ unlines [ "Error reading " ++ show (cSubsetFile conf) ++ ":\n  Malformed line " ++ show l ]
 
 data Datum = Datum { dKey :: !BS.ByteString
