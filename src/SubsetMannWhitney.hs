@@ -36,7 +36,6 @@ subsetMannWhitney conf = do
   dvals <- readData conf
   subsets <- readSubsets conf
   let stats = V.fromList $ mapMaybe (subsetStat conf dvals) subsets
-  writeFile (cOutBase conf ++ "_stats.txt") $ unlines . map show . V.toList $ stats
   let (fdrEsts, fdrTrials) = statFdr conf stats
   BS.writeFile (cOutBase conf ++ "_fdr_est.txt") $ fdrTrialReport conf fdrTrials
   BS.writeFile (cOutBase conf ++ "_subsets.txt") $ subsetReport conf stats fdrEsts
@@ -168,9 +167,9 @@ argConf = Conf <$>
           argDataFile <*>
           argOutBase <*>
           argMinSize <*>
-          pure 1e-9 <*>
-          pure 1e-1 <*>
-          pure 2.0
+          argPMin <*>
+          argPMax <*>
+          argPStep
 
 argSubsetFile :: Term FilePath
 argSubsetFile = required $ opt Nothing $ (optInfo ["s", "subsets"])
@@ -187,3 +186,18 @@ argOutBase = required $ opt Nothing $ (optInfo ["o", "outbase"])
 argMinSize :: Term (Maybe Int)
 argMinSize = value $ opt Nothing $ (optInfo ["n", "min-size"])
   { optName = "MIN-SIZE", optDoc = "Minimum number of genes inside and outside a subset for comparison" }
+
+argPMax :: Term Double
+argPMax = value $ opt defaultPMax $ (optInfo ["p-maximum"])
+  { optName = "PMAX", optDoc = "Maximum per-term p value for FDR estimation" }
+  where defaultPMax = 1e-1
+
+argPMin :: Term Double
+argPMin = value $ opt defaultPMin $ (optInfo ["p-minimum"])
+  { optName = "PMIN", optDoc = "Minimum per-term p value for FDR estimation" }
+  where defaultPMin = 1e-10
+
+argPStep :: Term Double
+argPStep = value $ opt defaultPStep $ (optInfo ["p-step"])
+  { optName = "PSTEP", optDoc = "p-value step (multiplicative) for FDR estimation" }
+  where defaultPStep = sqrt 2
