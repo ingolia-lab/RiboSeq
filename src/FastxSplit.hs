@@ -86,9 +86,10 @@ handleSeq conf sfate fq = do
   modifyIORef' (sfCount sfate) succ
   case sequLinkers (cLinkerFormat conf) fq of
     TooShort -> tooShort
-    res -> case HM.lookup (sequIndex res) (sfMap sfate) of
-      Nothing -> unknown res
-      Just s -> sample res s
+    res | BS.length (sequEnce res) < (cMinInsert conf) -> tooShort
+        | otherwise -> case HM.lookup (sequIndex res) (sfMap sfate) of
+                         Nothing -> unknown res
+                         Just s -> sample res s
   where tooShort = do modifyIORef' (sfShortCount sfate) succ
                       maybe (return ()) (\h -> hWriteFq h fq) $ sfShort sfate
         unknown res = maybe (return ()) (sample res) $ sfUnknown sfate
