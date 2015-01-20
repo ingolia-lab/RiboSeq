@@ -23,12 +23,19 @@ Library
   GHC-Options:         -auto-all -Wall
   Default-Language:    Haskell2010
 
+Executable bam-annotate
+  Main-is:             BamAnnotate.hs
+  Build-depends:       base, bytestring, cmdtheline, 
+                       monads-tf, unordered-containers, vector, conduit >= 1.2.1, resourcet,
+                       seqloc >= 0.6.1.1, seqloc-datafiles, samtools >= 0.2.4.1, samtools-conduit >= 0.1.0.1
+  Hs-Source-Dirs:      src
+
 Executable fastx-split
   Main-is:             FastxSplit.hs
   Other-modules:       Bio.RiboSeq.LinkerSeqs
   Build-depends:       base >= 4.2 && < 5, bytestring,
                        attoparsec >= 0.8.5, hashable, unordered-containers, directory,
-                       iteratee >= 0.8.1, seqloc < 0.6, biocore >= 0.2, transformers,
+                       iteratee >= 0.8.1, seqloc, biocore >= 0.2, transformers,
                        conduit, conduit-extra, vector, filepath, resourcet, cmdtheline
   Hs-Source-Dirs:      src
   Ghc-Options:         -auto-all -O2 -Wall
@@ -211,3 +218,4 @@ Executable subset-mw
   Build-depends:       base, bytestring, attoparsec, cmdtheline, statistics,
                        monads-tf, unordered-containers, vector
   Hs-Source-Dirs:      src
+
