@@ -23,7 +23,12 @@ import System.IO
 import Bio.SamTools.Bam as Bam
 import Bio.SamTools.Conduit as Bam
 import Bio.SeqLoc.Bed
+import qualified Bio.SeqLoc.Location as Loc
 import qualified Bio.SeqLoc.LocMap as SLM
+import Bio.SeqLoc.OnSeq
+import qualified Bio.SeqLoc.Position as Pos
+import qualified Bio.SeqLoc.SpliceLocation as SpLoc
+import Bio.SeqLoc.Strand
 import Bio.SeqLoc.Transcript
 
 main :: IO ()
@@ -38,7 +43,7 @@ bamAnnotate :: Conf -> IO ()
 bamAnnotate conf = do
   trxmap <- readAnnotMap conf
   runResourceT $ C.runConduit $
-    inputSource conf C.$= C.mapMaybe (annotate conf trxmap) C.$$ outputSink conf
+    inputSource conf C.$= C.mapMaybeM (annotate conf trxmap) C.$$ outputSink conf
 
 readAnnotMap :: Conf -> IO (SLM.SeqLocMap Transcript)
 readAnnotMap conf = do
@@ -55,8 +60,24 @@ outputSink :: (MonadResource m) => Conf -> C.Consumer Bam.Bam1 m ()
 outputSink conf | cTamOutput conf = Bam.sinkTamOutFile (cBamOutput conf)
                 | otherwise       = Bam.sinkBamOutFile (cBamOutput conf)
 
-annotate :: Conf -> SLM.SeqLocMap Transcript -> Bam.Bam1 -> Maybe Bam.Bam1
-annotate _conf _trxmap b = Just b
+annotate :: (MonadIO m) => Conf -> SLM.SeqLocMap Transcript -> Bam.Bam1 -> m (Maybe Bam.Bam1)
+annotate conf trxmap b = liftIO $ do
+  b1 <- Bam.addAuxZ b trxNameTag trxNames
+  b2 <- Bam.addAuxZ b1 trxPosTag trxPoses
+  return $ Just b2
+  where trxNameTag = "ZS"
+        trxPosTag = "ZQ"
+        hits = trxHits conf trxmap b
+        trxNames = intercalate "," . map (BS.unpack . unSeqLabel . trxId . fst) $ hits
+        trxPoses = intercalate "," . map (show . Pos.unOff . Loc.offset5 . snd) $ hits
+
+trxHits :: Conf -> SLM.SeqLocMap Transcript -> Bam.Bam1 -> [(Transcript, Loc.ContigLoc)]
+trxHits _conf trxmap b = case Bam.refSeqLoc b of
+  Just bamloc -> mapMaybe toContig $ SLM.queryLocInto (Just Plus) bamloc trxmap
+  Nothing -> []
+  where toContig (trx, sploc) = case Loc.toContigs sploc of
+          [c1] -> Just (trx, c1)
+          _ -> Nothing
 
 data Conf = Conf { cBamInput :: !FilePath
                  , cBedInput :: !FilePath
