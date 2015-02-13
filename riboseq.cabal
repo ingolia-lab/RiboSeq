@@ -26,7 +26,7 @@ Library
 Executable bam-suppress-duplicates
   Main-is:             BamSuppressDuplicates.hs
   Build-depends:       base, bytestring, cmdtheline, 
-                       monads-tf, unordered-containers, vector, conduit >= 1.2.1, resourcet,
+                       monads-tf, unordered-containers, hashable, vector, conduit >= 1.2.1, resourcet,
                        seqloc >= 0.6.1.1, seqloc-datafiles, samtools >= 0.2.4.1, samtools-conduit >= 0.1.0.1
   Hs-Source-Dirs:      src
 

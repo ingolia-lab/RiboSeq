@@ -10,9 +10,11 @@ import Control.Monad.Error
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
-import qualified Data.HashSet as HS
+import qualified Data.HashMap.Strict as HM
+import Data.Hashable
 import Data.List
 import Data.Maybe
+import Data.Ord
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 import Numeric
@@ -48,24 +50,61 @@ bamDupSupp conf = do
     runResourceT $ C.runConduit $
     Bam.sourceHandle infile C.$= C.groupBy sameLocation C.$$ C.foldM (processLocGroup conf hout mhdup) emptyStats
   maybe (return ()) (\hdup -> Bam.closeOutHandle hdup) mhdup
+  maybe (const $ return ()) writeStats (cStatOutput conf) $ stats
+  unless (cQuiet conf) $ do
+    hPutStrLn stderr $ unwords [ cBamInput conf ++ ":"
+                               , "Processed", (show . nReads $ stats), "reads"
+                               , "at", (show . nSites $ stats), "distinct sites."
+                               ]
+    hPutStrLn stderr $ unwords [ cBamInput conf ++ ":"
+                               , "Suppressed", (show . nDupls $ stats), "duplicates"
+                               , "at", (show . nDuplSites $ stats), "sites."
+                               ]
   return ()
 
-data Stats = Stats { nSites, nDupls :: !Int } deriving (Show, Eq)
+data SiteStat = SiteStat { ssTotal, ssUnique :: !Int } deriving (Show, Eq, Ord)
 
-emptyStats = Stats { nSites = 0, nDupls = 0 }
+instance Hashable SiteStat where
+  hashWithSalt salt (SiteStat ttl uniq) = hashWithSalt salt (ttl, uniq)
 
-countGroup :: Stats -> ([a], [b]) -> Stats
-countGroup s0 (_uniqs, []) = s0
-countGroup s0 (_uniqs, dupls@(_:_)) = Stats { nSites = 1 + nSites s0
-                                            , nDupls = length dupls + nDupls s0
+data Stats = Stats { statSites :: !(HM.HashMap SiteStat Int) } deriving (Show)
+
+emptyStats = Stats { statSites = HM.empty }
+
+countGroup :: Stats -> [[a]] -> Stats
+countGroup s0 taggroups = let ss = SiteStat { ssTotal = sum . map length $ taggroups
+                                            , ssUnique = length taggroups
                                             }
+                          in Stats { statSites = HM.insertWith (+) ss 1 $ statSites s0 }
+
+nDupls :: Stats -> Int
+nDupls = HM.foldlWithKey' countDupls 0 . statSites
+  where countDupls ct0 (SiteStat ttl uniq) n = ct0 + ((ttl - uniq) * n)
+
+nDuplSites :: Stats -> Int
+nDuplSites = HM.foldlWithKey' countDuplSites 0 . statSites
+  where countDuplSites ct0 (SiteStat ttl uniq) n = ct0 + (if ttl > uniq then n else 0)
+
+nSites :: Stats -> Int
+nSites = HM.foldl' countSites 0 . statSites
+  where countSites ct0 n = ct0 + n
+
+nReads :: Stats -> Int
+nReads = HM.foldlWithKey' countReads 0 . statSites
+  where countReads ct0 (SiteStat ttl _uniq) n = ct0 + (ttl * n)
+
+writeStats :: FilePath -> Stats -> IO ()
+writeStats statfile stats = BS.writeFile statfile stattable
+  where stattable = BS.unlines . map statLine . sortBy (comparing fst) . HM.toList . statSites $ stats
+        statLine ((SiteStat ttl uniq), n) = BS.intercalate "\t" . map (BS.pack . show) $ [ ttl, uniq, n ]
 
 processLocGroup :: (MonadResource m) => Conf -> Bam.OutHandle -> Maybe Bam.OutHandle -> Stats -> [Bam.Bam1] -> m Stats
 processLocGroup conf hout mhdup stat0 bs = do
-  grps@(uniqs, dupls) <- suppressDuplicates conf $ groupByTag bs
+  let taggroups = groupByTag bs
+  (uniqs, dupls) <- suppressDuplicates conf taggroups
   liftIO $ forM_ uniqs $ Bam.put1 hout
   maybe (return ()) (\hdup -> liftIO $ forM_ dupls $ Bam.put1 hdup) mhdup
-  return $! countGroup stat0 grps
+  return $! countGroup stat0 taggroups
 
 suppressDuplicates :: (MonadIO m) => Conf -> [[Bam.Bam1]] -> m ([Bam.Bam1], [Bam.Bam1])
 suppressDuplicates conf taggroups = do
@@ -111,6 +150,7 @@ data Conf = Conf { cBamInput :: !FilePath
                  , cDupOutput :: !(Maybe FilePath)
                  , cStatOutput :: !(Maybe FilePath)
                  , cAnnotate :: !Bool
+                 , cQuiet :: !Bool
                  } deriving (Show)
 
 argConf :: Term Conf
@@ -119,7 +159,8 @@ argConf = Conf <$>
           argBamOutput <*>
           argDupOutput <*>
           argStatOutput <*>
-          argAnnotate
+          argAnnotate <*>
+          argQuiet
 
 argBamInput :: Term FilePath
 argBamInput = required $ opt Nothing $ (optInfo ["i", "input"])
@@ -139,3 +180,6 @@ argStatOutput = value $ opt Nothing $ (optInfo ["s", "stats", "statistics"])
 
 argAnnotate :: Term Bool
 argAnnotate = value $ flag $ (optInfo ["u", "text-input"]) { optDoc = "Text format input" }
+
+argQuiet :: Term Bool
+argQuiet = value $ flag $ (optInfo ["q", "quiet"]) { optDoc = "Quiet operation" }
