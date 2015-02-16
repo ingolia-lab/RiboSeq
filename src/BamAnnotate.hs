@@ -62,18 +62,34 @@ outputSink conf | cTamOutput conf = Bam.sinkTamOutFile (cBamOutput conf)
 
 annotate :: (MonadIO m) => Conf -> SLM.SeqLocMap Transcript -> Bam.Bam1 -> m (Maybe Bam.Bam1)
 annotate conf trxmap b = liftIO $ do
-  b1 <- Bam.addAuxZ b trxNameTag trxNames
-  b2 <- Bam.addAuxZ b1 trxPosTag trxPoses
-  return $ Just b2
-  where trxNameTag = "ZS"
-        trxPosTag = "ZQ"
+  b1 <- if null hits
+        then return b
+        else Bam.addAuxZ b trxNameTag $ annotNames conf hits
+  b2 <- if null hits
+        then return b1
+        else Bam.addAuxZ b1 trxPosTag $ annotPoses conf hits
+  b3 <- if null hits || not (cAnnotStrand conf)
+        then return b2
+        else Bam.addAuxZ b2 trxStrandTag $ annotStrands conf hits
+  return $ Just b3
+  where trxNameTag = "ZT"
+        trxPosTag = "ZP"
+        trxStrandTag = "ZS"
         hits = trxHits conf trxmap b
-        trxNames = intercalate "," . map (BS.unpack . unSeqLabel . trxId . fst) $ hits
-        trxPoses = intercalate "," . map (show . Pos.unOff . Loc.offset5 . snd) $ hits
+
+annotNames :: Conf -> [(Transcript, Loc.ContigLoc)] -> String
+annotNames _conf hits = intercalate "," . map (BS.unpack . unSeqLabel . trxId . fst) $ hits
+
+annotPoses :: Conf -> [(Transcript, Loc.ContigLoc)] -> String
+annotPoses _conf hits = intercalate "," . map (show . Pos.unOff . Loc.offset5 . snd) $ hits
+
+annotStrands :: Conf -> [(Transcript, Loc.ContigLoc)] -> String
+annotStrands _conf hits = intercalate "," . map (strandchr . Loc.strand . snd) $ hits
+  where strandchr str = case str of Plus -> "+"; Minus -> "-"
 
 trxHits :: Conf -> SLM.SeqLocMap Transcript -> Bam.Bam1 -> [(Transcript, Loc.ContigLoc)]
-trxHits _conf trxmap b = case Bam.refSeqLoc b of
-  Just bamloc -> mapMaybe toContig $ SLM.queryLocInto (Just Plus) bamloc trxmap
+trxHits conf trxmap b = case Bam.refSeqLoc b of
+  Just bamloc -> mapMaybe toContig $ SLM.queryLocInto (cStrandSpecific conf) bamloc trxmap
   Nothing -> []
   where toContig (trx, sploc) = case Loc.toContigs sploc of
           [c1] -> Just (trx, c1)
@@ -85,6 +101,8 @@ data Conf = Conf { cBamInput :: !FilePath
                  , cBinSize :: !Int
                  , cTamInput :: !Bool
                  , cTamOutput :: !Bool
+                 , cAnnotStrand :: !Bool
+                 , cStrandSpecific :: !(Maybe Strand)
                  } deriving (Show)
 
 argConf :: Term Conf
@@ -94,7 +112,9 @@ argConf = Conf <$>
           argBamOutput <*>
           argBinSize <*>
           argTamInput <*>
-          argTamOutput
+          argTamOutput <*>
+          argAnnotStrand <*> 
+          argStrandSpecific
 
 argBamInput :: Term FilePath
 argBamInput = required $ opt Nothing $ (optInfo ["i", "input"])
@@ -118,3 +138,13 @@ argTamInput = value $ flag $ (optInfo ["u", "text-input"]) { optDoc = "Text form
 
 argTamOutput :: Term Bool
 argTamOutput = value $ flag $ (optInfo ["t", "text-output"]) { optDoc = "Text format output" }
+
+argAnnotStrand :: Term Bool
+argAnnotStrand = value $ flag $ (optInfo ["a", "annotate-strand"]) { optDoc = "Annotate relative strand of feature overlap" }
+
+argStrandSpecific :: Term (Maybe Strand)
+argStrandSpecific = value $ vFlag Nothing [ ( Just Plus,  (optInfo ["f", "forward"]) { optDoc = "Annotate only \"forward\" (i.e., same strand) overlaps" })
+                                          , ( Just Minus, (optInfo ["r", "reverse"]) { optDoc = "Annotate only \"reverse\" (i.e., opposite strand) overlaps" })
+                                          ]
+
+                    
