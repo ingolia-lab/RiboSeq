@@ -17,7 +17,7 @@ Library
   Exposed-Modules:     Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.Counting,
                        Bio.RiboSeq.BamFile, Bio.RiboSeq.Framing
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee,
-                       transformers, monads-tf, vector, unordered-containers,
+                       transformers, monads-tf, vector, hashable, unordered-containers,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   GHC-Options:         -auto-all -Wall
@@ -62,7 +62,7 @@ Executable fp-framing
   Other-Modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.Counting,
                        Bio.RiboSeq.BamFile, Bio.RiboSeq.Framing
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee,
-                       transformers, monads-tf, vector, unordered-containers,
+                       transformers, monads-tf, vector, hashable, unordered-containers,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -Wall
@@ -83,7 +83,7 @@ Executable fp-transcript
   Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting,
                        Bio.RiboSeq.Translation
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, filepath,
-                       transformers, monads-tf, vector,
+                       transformers, monads-tf, vector, hashable, unordered-containers,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
@@ -94,7 +94,7 @@ Executable profile-distribution
   Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting,
                        Bio.RiboSeq.Translation
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, filepath,
-                       transformers, monads-tf, vector, statistics,
+                       transformers, monads-tf, vector, statistics, hashable, unordered-containers,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
@@ -104,7 +104,7 @@ Executable bed-count
   Main-is:             BedCount.hs
   Other-modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile, Bio.RiboSeq.Counting
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, filepath,
-                       transformers, monads-tf, vector,
+                       transformers, monads-tf, vector, hashable, unordered-containers,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
@@ -153,7 +153,7 @@ Executable train-harr-start
                        Bio.RiboSeq.Translation, Bio.RiboSeq.SVMLight, Bio.RiboSeq.StartSVM
   Build-depends:       base, bytestring, containers, attoparsec >= 0.8.5, filepath, process, unix, directory,
                        transformers, monads-tf, vector, iteratee, conduit, MonadCatchIO-transformers, cmdtheline,
-                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee, hashable, unordered-containers
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
   Default-Language:    Haskell2010  
@@ -164,7 +164,7 @@ Executable test-harr-start
                        Bio.RiboSeq.Translation, Bio.RiboSeq.SVMLight, Bio.RiboSeq.StartSVM
   Build-depends:       base, bytestring, containers, attoparsec >= 0.8.5, filepath, process, unix, directory,
                        transformers, monads-tf, vector, iteratee, conduit, MonadCatchIO-transformers, cmdtheline,
-                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee, hashable, unordered-containers
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
   Default-Language:    Haskell2010  
@@ -176,7 +176,7 @@ Executable test-ltm-start
                        Bio.RiboSeq.StartLTM
   Build-depends:       base, bytestring, containers, attoparsec >= 0.8.5, filepath, process, unix, directory,
                        transformers, monads-tf, vector, iteratee, conduit, MonadCatchIO-transformers, cmdtheline,
-                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee, hashable, unordered-containers
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
   Default-Language:    Haskell2010  
@@ -188,7 +188,7 @@ Executable start-sites
                        Bio.RiboSeq.StartLTM
   Build-depends:       base, bytestring, containers, attoparsec >= 0.8.5, filepath, process, unix, directory,
                        transformers, monads-tf, vector, iteratee, conduit, MonadCatchIO-transformers, cmdtheline,
-                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee, hashable, unordered-containers
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -O2 -Wall
   Default-Language:    Haskell2010  
