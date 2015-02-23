@@ -22,6 +22,7 @@ import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Unboxed.Mutable as UM
 
 import qualified Bio.SamTools.Bam as Bam
+import qualified Bio.SeqLoc.LocMap as LM
 import qualified Bio.SeqLoc.Location as Loc
 import Bio.SeqLoc.OnSeq
 import qualified Bio.SeqLoc.Position as Pos
@@ -204,14 +205,14 @@ fsioFreeze fsio = FramingStats <$>
                   (pure . fsioBodyStartMin $ fsio) <*>
                   (pure . fsioBodyEndMax $ fsio)
 
-fsioIncr :: FramingStatsIO -> (Pos.Offset, Pos.Offset) -> Int -> IO (Bool, Bool, Bool)
-fsioIncr fsio (vsStart, vsEnd) len = do
-  atStart <- lfioIncr (fsioStart fsio) vsStart len
-  atEnd <- lfioIncr (fsioEnd fsio) vsEnd len
-  inBody <- if (vsStart >= fsioBodyStartMin fsio) && (vsEnd <= fsioBodyEndMax fsio)
-            then lfioIncr (fsioBody fsio) (vsStart `mod` 3) len
-            else return False
-  return (atStart, atEnd, inBody)
+-- fsioIncr :: FramingStatsIO -> (Pos.Offset, Pos.Offset) -> Int -> IO (Bool, Bool, Bool)
+-- fsioIncr fsio (vsStart, vsEnd) len = do
+--   atStart <- lfioIncr (fsioStart fsio) vsStart len
+--   atEnd <- lfioIncr (fsioEnd fsio) vsEnd len
+--   inBody <- if (vsStart >= fsioBodyStartMin fsio) && (vsEnd <= fsioBodyEndMax fsio)
+--             then lfioIncr (fsioBody fsio) (vsStart `mod` 3) len
+--             else return False
+--   return (atStart, atEnd, inBody)
 
 -- | When the location of @bam@ (as per 'Bam.refSeqLoc') lies within
 -- the location of @trx@ and on the forward strand, and @trx@ has an
@@ -222,14 +223,70 @@ fsioIncr fsio (vsStart, vsEnd) len = do
 -- second @Pos.Offset@ is the position relative to the stop codon,
 -- with '0' indicating that the first nucleotide of the stop codon is
 -- the 5\' end of the alignment.
-bamCdsRel :: Transcript -> Bam.Bam1 -> Maybe (Pos.Offset, Pos.Offset)
-bamCdsRel trx bam = bamRel <$> cds trx <*> (Bam.refSeqLoc bam >>= bamInto (location trx))
-  where bamInto (OnSeq trxRef trxLoc) (OnSeq bamRef bamLoc)
-          | trxRef /= bamRef = Nothing
-          | otherwise = do into <- bamLoc `SpLoc.locInto` trxLoc
-                           case Loc.toContigs into of
-                             [c] | Loc.strand c == Plus -> Just c
-                             _ -> Nothing
-        bamRel cdsLoc bamLoc = ( Loc.offset5 bamLoc - Loc.offset5 cdsLoc
-                               , Loc.offset5 bamLoc - (Loc.offset5 cdsLoc + Loc.length cdsLoc - 3)
-                               ) 
+
+data FpFailure = FpNoGene
+               | FpNoncodingOnly
+               | FpNoncodingOverlap
+               | FpMultiCoding
+               | FpNoCompatible
+               deriving (Show, Ord, Eq, Bounded, Enum)
+
+type FpFraming = Either FpFailure (Maybe Pos.Offset, Maybe Pos.Offset, Maybe Pos.Offset)
+
+groupByGene :: [Transcript] -> [[Transcript]]
+groupByGene = groupBy sameGene
+  where sameGene t1 t2 = geneId t1 == geneId t2
+
+isNoncoding :: Transcript -> Bool
+isNoncoding = isNothing . cds
+
+isCoding :: Transcript -> Bool
+isCoding = isJust . cds
+
+maybeAllSame :: (Eq a) => [a] -> Maybe a
+maybeAllSame [] = Nothing
+maybeAllSame (x0:rest) = if all (== x0) rest then Just x0 else Nothing
+
+fpFramings :: (Pos.Offset, Pos.Offset) -> LM.SeqLocMap Transcript -> SpliceSeqLoc -> FpFraming
+fpFramings bodyBnds trxmap fploc = case groupByGene $ LM.queryLocatable (Just Plus) fploc trxmap of
+  [] -> Left FpNoGene
+  [trxs] -> case filter isCoding trxs of
+    [] -> Left FpNoncodingOnly
+    codings -> geneFramings bodyBnds codings fploc
+  genes -> case map (all isNoncoding) genes of
+    isnc | and isnc  -> Left FpNoncodingOnly
+         | or isnc   -> Left FpNoncodingOverlap
+         | otherwise -> Left FpMultiCoding
+
+geneFramings :: (Pos.Offset, Pos.Offset) -> [Transcript] -> SpliceSeqLoc -> FpFraming
+geneFramings (bodyStartMin, bodyEndMax) codings fploc =
+  case mapMaybe (cdsRelIntoTranscript fploc) codings of
+    [] -> Left FpNoCompatible
+    termini -> let (vsStarts, vsEnds) = unzip termini
+                   frames = mapMaybe cdsRelToFrame termini
+               in Right ( maybeAllSame vsStarts
+                        , maybeAllSame vsEnds
+                        , maybeAllSame frames
+                        )
+  where cdsRelToFrame (vsStart, vsEnd)
+          | (vsStart >= bodyStartMin) && (vsEnd <= bodyEndMax) = Just $! vsStart `mod` 3
+          | otherwise = Nothing
+                
+cdsRelIntoTranscript :: SpliceSeqLoc -> Transcript -> Maybe (Pos.Offset, Pos.Offset)  
+cdsRelIntoTranscript fploc trx = do fpinto <- spliceSeqLocIntoContig fploc $ location trx
+                                    cdsloc <- cds trx
+                                    return $! cdsRel cdsloc fpinto
+
+spliceSeqLocIntoContig (OnSeq spref sploc) (OnSeq outref outloc)
+  | spref /= outref = Nothing
+  | otherwise = sploc `SpLoc.locInto` outloc >>= toSingleContig
+  where toSingleContig l = case Loc.toContigs l of
+          [c] -> Just c
+          _ -> Nothing
+
+cdsRel :: Loc.ContigLoc -> Loc.ContigLoc -> (Pos.Offset, Pos.Offset)
+cdsRel cdsLoc fpLoc =
+  ( Loc.offset5 fpLoc - Loc.offset5 cdsLoc
+  , Loc.offset5 fpLoc - (Loc.offset5 cdsLoc + Loc.length cdsLoc - 3)
+  )
+
