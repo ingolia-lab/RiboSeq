@@ -61,9 +61,9 @@ Executable fp-framing
   Main-Is:             FpFraming.hs
   Other-Modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.Counting,
                        Bio.RiboSeq.BamFile, Bio.RiboSeq.Framing
-  Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, cmdtheline,
+  Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, resourcet, conduit, cmdtheline,
                        transformers, monads-tf, vector, hashable, unordered-containers,
-                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
+                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee, samtools-conduit
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -Wall
   Default-Language:    Haskell2010

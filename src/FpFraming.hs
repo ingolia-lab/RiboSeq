@@ -6,6 +6,7 @@ module Main
 import Control.Applicative
 import Control.Exception
 import Control.Monad.Reader
+import Control.Monad.Trans.Resource
 import qualified Data.ByteString.Char8 as BS
 import Data.List (intercalate, maximumBy)
 import Data.Maybe
@@ -16,31 +17,81 @@ import System.Console.CmdTheLine
 import System.IO
 
 import qualified Data.Vector as V
+import qualified Data.Conduit as C
+import qualified Data.Conduit.List as C
 
+import qualified Bio.SamTools.Bam as Bam
+import qualified Bio.SamTools.Conduit as Bam
+
+import Bio.SeqLoc.Bed
 import qualified Bio.SamTools.BamIndex as BamIndex
+import qualified Bio.SeqLoc.LocMap as SLM
 import Bio.SeqLoc.LocRepr
+import Bio.SeqLoc.OnSeq
 import qualified Bio.SeqLoc.Position as Pos
+import Bio.SeqLoc.Transcript
 
 import Bio.RiboSeq.BamFile
 import Bio.RiboSeq.Framing
 
 doFpFraming :: Conf -> IO ()
-doFpFraming conf = do trstartio <- newTerminus (confFlank conf) (confLengths conf)
-                      trendio <- newTerminus (confFlank conf) (confLengths conf)
-                      frameio <- newFrame (confLengths conf)
-                      let count trx iloc = do countAtStart trstartio trx iloc
-                                              countAtEnd trendio trx iloc
-                                              countInCds (confCdsBody conf) frameio trx iloc
-                      withMany (\bam -> bracket (BamIndex.open bam) (BamIndex.close)) (confBamInputs conf) $ \bidxs ->
-                        mapOverTranscripts (confBeds conf) $ \trx ->
-                        forM_ bidxs $ \bidx -> mapOverBams bidx (count trx) trx
-                      trstart <- freezeTerminus trstartio
-                      trend <- freezeTerminus trendio
-                      frame <- freezeFrame frameio
-                      writeFile (confOutput conf ++ "_start_pos_len.txt") . posLenTable $ trstart
-                      writeFile (confOutput conf ++ "_end_pos_len.txt") . posLenTable $ trend
-                      writeFile (confOutput conf ++ "_frame_len.txt") . frameLenTable $ frame
-                      writeFile (confOutput conf ++ "_asite_report.txt") $ framingTable frame trstart trend
+doFpFraming conf = do
+  trxmap <- readAnnotMap conf
+  fsio <- fsioNew (confFlank conf) (confFlank conf) (confLengths conf) 
+  Bam.withBamInFile (confBamInput conf) $ \hin ->
+    withMaybeBamOutFile conf (Bam.inHeader hin) $ \mhout ->
+    runResourceT $ C.runConduit $
+    Bam.sourceHandle hin C.$$
+    C.mapM_ (\bam -> let bamfr = bamFraming (confCdsBody conf) trxmap bam
+                     in liftIO $ do
+                       fsioIncr fsio bamfr (maybe (-1) fromIntegral $ Bam.queryLength bam)
+                       case mhout of
+                         Nothing -> return ()
+                         Just hout -> do bannot <- Bam.addAuxZ bam tagFraming (framingAux bamfr)
+                                         Bam.put1 hout bannot)
+  fstats <- fsioFreeze fsio
+  print fstats
+  return ()
+  
+tagFraming :: String
+tagFraming = "ZF"
+
+framingAux (Left err) = show err
+framingAux (Right (FpFraming start end frame gene))
+  = intercalate "/" [ BS.unpack . unSeqLabel $ gene, showmz start, showmz end, showmz frame ]
+  where showmz (Just z) = showSigned showInt 0 z ""
+        showmz Nothing = "*"
+
+readAnnotMap :: Conf -> IO (SLM.SeqLocMap Transcript)
+readAnnotMap conf = do
+  trxs <- concat <$> mapM readBedTranscripts (confBeds conf)
+  let trxmap = SLM.locatableSeqLocMap defaultBinSize trxs
+  hPutStrLn stderr $! "Read " ++ show (length trxs) ++ " annotations from " ++ show (confBeds conf)
+  return $! trxmap
+  where defaultBinSize = 100000
+
+withMaybeBamOutFile :: Conf -> Bam.Header -> (Maybe Bam.OutHandle -> IO ()) -> IO ()
+withMaybeBamOutFile conf inHeader f = case confAnnotate conf of
+  Nothing -> f Nothing
+  Just annotName -> Bam.withBamOutFile annotName inHeader $ \hout -> f (Just hout)
+
+-- doFpFraming :: Conf -> IO ()
+-- doFpFraming conf = do trstartio <- newTerminus (confFlank conf) (confLengths conf)
+--                       trendio <- newTerminus (confFlank conf) (confLengths conf)
+--                       frameio <- newFrame (confLengths conf)
+--                       let count trx iloc = do countAtStart trstartio trx iloc
+--                                               countAtEnd trendio trx iloc
+--                                               countInCds (confCdsBody conf) frameio trx iloc
+--                       withMany (\bam -> bracket (BamIndex.open bam) (BamIndex.close)) (confBamInputs conf) $ \bidxs ->
+--                         mapOverTranscripts (confBeds conf) $ \trx ->
+--                         forM_ bidxs $ \bidx -> mapOverBams bidx (count trx) trx
+--                       trstart <- freezeTerminus trstartio
+--                       trend <- freezeTerminus trendio
+--                       frame <- freezeFrame frameio
+--                       writeFile (confOutput conf ++ "_start_pos_len.txt") . posLenTable $ trstart
+--                       writeFile (confOutput conf ++ "_end_pos_len.txt") . posLenTable $ trend
+--                       writeFile (confOutput conf ++ "_frame_len.txt") . frameLenTable $ frame
+--                       writeFile (confOutput conf ++ "_asite_report.txt") $ framingTable frame trstart trend
 
 frameLenTable :: Framing -> String
 frameLenTable fr = unlines $ header ++ proflines (frprofile fr)
@@ -121,9 +172,9 @@ posLenTable tr = unlines $ header ++ proflines (profile tr)
 unfields :: [String] -> String
 unfields = intercalate "\t"
 
-data Conf = Conf { confBamInputs :: [FilePath]
+data Conf = Conf { confBamInput :: !FilePath
                  , confOutput :: !(FilePath) 
-                 , confBeds :: [FilePath]
+                 , confBeds :: ![FilePath]
                  , confFlank :: !(Pos.Offset, Pos.Offset)
                  , confCdsBody :: !(Pos.Offset, Pos.Offset)
                  , confLengths :: !(Int, Int)
@@ -132,7 +183,7 @@ data Conf = Conf { confBamInputs :: [FilePath]
 
 argConf :: Term Conf
 argConf = Conf <$>
-          argBamInputs <*>
+          argBamInput <*>
           argOutput <*>
           argBedFiles <*>
           argFlank <*>
@@ -152,8 +203,8 @@ instance ArgVal (Pos.Offset, Pos.Offset) where
 instance ArgVal (Int, Int) where
   converter = pair ','
 
-argBamInputs :: Term [FilePath]
-argBamInputs = nonEmpty $ posAny [] $ posInfo
+argBamInput :: Term FilePath
+argBamInput = required $ pos 0 Nothing $ posInfo
   { posName = "BAM", posDoc = "BAM format alignment file" }
 
 argOutput :: Term FilePath
