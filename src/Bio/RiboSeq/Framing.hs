@@ -223,7 +223,7 @@ fsioIncr fsio (Left failure) _len = let failidx = fromEnum failure
                                     in do modifyIORef' (fsioTotal fsio) succ
                                           UM.read (fsioFailure fsio) failidx >>= \n0 ->
                                             UM.write (fsioFailure fsio) failidx $! succ n0
-fsioIncr fsio (Right (FpFraming mstart mend mframe)) len = do
+fsioIncr fsio (Right (FpFraming mstart mend mframe _gene)) len = do
   modifyIORef' (fsioTotal fsio) succ
   _ <- maybe (return False) (\start -> lfioIncr (fsioStart fsio) start len) mstart
   _ <- maybe (return False) (\end -> lfioIncr (fsioEnd fsio) end len) mend
@@ -277,7 +277,7 @@ data FpFailure = FpNoGene
 -- the position within the reading frame. In the presence of multiple
 -- transcript isoforms, some of these values may be 'Nothing' when
 -- several different results would arise from different isoforms.
-data FpFraming = FpFraming { fpVsStart, fpVsEnd, fpReadingFrame :: !(Maybe Pos.Offset) } deriving (Show)
+data FpFraming = FpFraming { fpVsStart, fpVsEnd, fpReadingFrame :: !(Maybe Pos.Offset), fpGene :: !SeqLabel } deriving (Show)
 
 -- | Result of framing analysis of a footprint alignment, indicating
 -- either the calculated frame in 'FpFraming' or an 'FpFailure'.
@@ -362,8 +362,8 @@ geneFraming (bodyStartMin, bodyEndMax) codings fploc =
                    vsEnd = maybeAllSame . map snd $ termini
                    frames = mapMaybe cdsRelToFrame termini
                in case group frames of
-                 [] -> Right $! FpFraming { fpVsStart = vsStart, fpVsEnd = vsEnd, fpReadingFrame = Nothing }
-                 [(fr:_)] -> Right $! FpFraming { fpVsStart = vsStart, fpVsEnd = vsEnd, fpReadingFrame = Just fr }
+                 [] -> Right $! FpFraming { fpVsStart = vsStart, fpVsEnd = vsEnd, fpReadingFrame = Nothing, fpGene = gene }
+                 [(fr:_)] -> Right $! FpFraming { fpVsStart = vsStart, fpVsEnd = vsEnd, fpReadingFrame = Just fr, fpGene = gene }
                  _ -> Left FpAmbigFrame
   where cdsRelToFrame (vsStart, vsEnd)
           | (vsStart >= bodyStartMin) && (vsEnd <= bodyEndMax) = Just $! vsStart `mod` 3
@@ -371,7 +371,10 @@ geneFraming (bodyStartMin, bodyEndMax) codings fploc =
         maybeAllSame :: (Eq a) => [a] -> Maybe a
         maybeAllSame [] = Nothing
         maybeAllSame (x0:rest) = if all (== x0) rest then Just x0 else Nothing
-                
+        gene = case codings of
+          [] -> error "geneFraming: No coding transcripts"
+          (trx0:_) -> geneId trx0
+
 -- | Find the relative position of an @fpLoc@ specified in /genomic/
 -- coordinates relative to the start and stop codons of the
 -- transcript, as per 'cdsRel', if these are defined. If the
