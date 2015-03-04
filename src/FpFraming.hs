@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, ScopedTypeVariables, FlexibleInstances #-}
 
 module Main
        where 
@@ -12,12 +12,9 @@ import Data.Maybe
 import Data.Ord
 import Foreign.Marshal.Utils
 import Numeric
-import System.Console.GetOpt
-import System.Environment
+import System.Console.CmdTheLine
 import System.IO
 
-import qualified Data.Attoparsec as AP
-import qualified Data.Attoparsec.Char8 as AP
 import qualified Data.Vector as V
 
 import qualified Bio.SamTools.BamIndex as BamIndex
@@ -27,32 +24,23 @@ import qualified Bio.SeqLoc.Position as Pos
 import Bio.RiboSeq.BamFile
 import Bio.RiboSeq.Framing
 
-main :: IO ()
-main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
-    where handleOpt (_,    _,         errs@(_:_)) = usage (unlines errs)
-          handleOpt (args, bams, []) = either usage (doFpFraming bams) $ argsToConf args
-          usage errs = do prog <- getProgName
-                          let progline = prog ++ " [OPTIONS] <BAM1> <BAM2> ..."
-                          hPutStr stderr $ usageInfo progline optDescrs
-                          hPutStrLn stderr errs
-
-doFpFraming :: [FilePath] -> Conf -> IO ()
-doFpFraming bams conf = do trstartio <- newTerminus (confFlank conf) (confLengths conf)
-                           trendio <- newTerminus (confFlank conf) (confLengths conf)
-                           frameio <- newFrame (confLengths conf)
-                           let count trx iloc = do countAtStart trstartio trx iloc
-                                                   countAtEnd trendio trx iloc
-                                                   countInCds (confCdsBody conf) frameio trx iloc
-                           withMany (\bam -> bracket (BamIndex.open bam) (BamIndex.close)) bams $ \bidxs ->
-                             mapOverTranscripts (confBeds conf) $ \trx ->
-                             forM_ bidxs $ \bidx -> mapOverBams bidx (count trx) trx
-                           trstart <- freezeTerminus trstartio
-                           trend <- freezeTerminus trendio
-                           frame <- freezeFrame frameio
-                           writeFile (confOutput conf ++ "_start_pos_len.txt") . posLenTable $ trstart
-                           writeFile (confOutput conf ++ "_end_pos_len.txt") . posLenTable $ trend
-                           writeFile (confOutput conf ++ "_frame_len.txt") . frameLenTable $ frame
-                           writeFile (confOutput conf ++ "_asite_report.txt") $ framingTable frame trstart trend
+doFpFraming :: Conf -> IO ()
+doFpFraming conf = do trstartio <- newTerminus (confFlank conf) (confLengths conf)
+                      trendio <- newTerminus (confFlank conf) (confLengths conf)
+                      frameio <- newFrame (confLengths conf)
+                      let count trx iloc = do countAtStart trstartio trx iloc
+                                              countAtEnd trendio trx iloc
+                                              countInCds (confCdsBody conf) frameio trx iloc
+                      withMany (\bam -> bracket (BamIndex.open bam) (BamIndex.close)) (confBamInputs conf) $ \bidxs ->
+                        mapOverTranscripts (confBeds conf) $ \trx ->
+                        forM_ bidxs $ \bidx -> mapOverBams bidx (count trx) trx
+                      trstart <- freezeTerminus trstartio
+                      trend <- freezeTerminus trendio
+                      frame <- freezeFrame frameio
+                      writeFile (confOutput conf ++ "_start_pos_len.txt") . posLenTable $ trstart
+                      writeFile (confOutput conf ++ "_end_pos_len.txt") . posLenTable $ trend
+                      writeFile (confOutput conf ++ "_frame_len.txt") . frameLenTable $ frame
+                      writeFile (confOutput conf ++ "_asite_report.txt") $ framingTable frame trstart trend
 
 frameLenTable :: Framing -> String
 frameLenTable fr = unlines $ header ++ proflines (frprofile fr)
@@ -133,81 +121,69 @@ posLenTable tr = unlines $ header ++ proflines (profile tr)
 unfields :: [String] -> String
 unfields = intercalate "\t"
 
-data Conf = Conf { confOutput :: !(FilePath) 
+data Conf = Conf { confBamInputs :: [FilePath]
+                 , confOutput :: !(FilePath) 
                  , confBeds :: [FilePath]
                  , confFlank :: !(Pos.Offset, Pos.Offset)
                  , confCdsBody :: !(Pos.Offset, Pos.Offset)
                  , confLengths :: !(Int, Int)
+                 , confAnnotate :: !(Maybe FilePath)
                  } deriving (Show)
 
-defaultFlank :: (Pos.Offset, Pos.Offset)
-defaultFlank = (-100, 100)
+argConf :: Term Conf
+argConf = Conf <$>
+          argBamInputs <*>
+          argOutput <*>
+          argBedFiles <*>
+          argFlank <*>
+          argBody <*>
+          argLengths <*>
+          argAnnotate
 
-defaultCdsBody :: (Pos.Offset, Pos.Offset)
-defaultCdsBody = (34, 31)
+instance ArgVal Pos.Offset where
+  converter = let (intParser :: ArgParser Int, intPrinter :: ArgPrinter Int) = converter
+              in ( either Left (Right . fromIntegral) . intParser
+                 , intPrinter . fromIntegral
+                 )
 
-defaultLengths :: (Int, Int)
-defaultLengths = (25, 34)
+instance ArgVal (Pos.Offset, Pos.Offset) where
+  converter = pair ','
 
-data Arg = ArgOutput { unArgOutput :: !String }
-         | ArgBed { unArgBed :: !String }
-         | ArgFlanking { unArgFlanking :: !String }
-         | ArgCdsBody { unArgCdsBody :: !String }
-         | ArgLengths { unArgLengths :: !String }
-         deriving (Show, Read, Eq, Ord)
+instance ArgVal (Int, Int) where
+  converter = pair ','
 
-argOutput :: Arg -> Maybe String
-argOutput (ArgOutput del) = Just del
-argOutput _ = Nothing
+argBamInputs :: Term [FilePath]
+argBamInputs = nonEmpty $ posAny [] $ posInfo
+  { posName = "BAM", posDoc = "BAM format alignment file" }
 
-argBed :: Arg -> Maybe String
-argBed (ArgBed bed) = Just bed
-argBed _ = Nothing
+argOutput :: Term FilePath
+argOutput = required $ opt Nothing $ (optInfo ["o", "output"])
+  { optName = "OUTBASE", optDoc = "Base filename for output files" }
 
-argFlanking :: Arg -> Maybe String
-argFlanking (ArgFlanking flanking) = Just flanking
-argFlanking _ = Nothing
+argBedFiles :: Term [FilePath]
+argBedFiles = nonEmpty $ optAll [] $ (optInfo ["b", "bed"])
+  { optName = "BED", optDoc = "BED-format annotation filename" }
 
-argCdsBody :: Arg -> Maybe String
-argCdsBody (ArgCdsBody cdsbody) = Just cdsbody
-argCdsBody _ = Nothing
+argFlank :: Term (Pos.Offset, Pos.Offset)
+argFlank = value $ opt (-100, 100) $ (optInfo ["f", "flanking"])
+  { optName = "START,END", optDoc = "Range of profiles surrounding the start and end codons" }
 
-argLengths :: Arg -> Maybe String
-argLengths (ArgLengths lengths) = Just lengths
-argLengths _ = Nothing
+argBody :: Term (Pos.Offset, Pos.Offset)
+argBody = value $ opt (34, 31) $ (optInfo ["c", "cdsbody"])
+  { optName = "AFTERSTART,BEFOREEND", optDoc = "Offsets from the start and end of the gene for framing analysis" }
 
-optDescrs :: [OptDescr Arg]
-optDescrs = [ Option ['o'] ["output"]   (ReqArg ArgOutput "OUTFILE")        "Output filename"
-            , Option ['b'] ["bed"]      (ReqArg ArgBed "BED")               "Bed filename"
-            , Option ['f'] ["flanking"] (ReqArg ArgFlanking "START,END")    flankingDesc
-            , Option ['c'] ["cdsbody"]  (ReqArg ArgCdsBody "5',3'")         cdsbodyDesc
-            , Option ['l'] ["lengths"]  (ReqArg ArgLengths "MIN,MAX")       lengthDesc
-            ]
-  where flankingDesc = "Range of profile before and after terminus [" ++
-                       (BS.unpack . repr . fst $ defaultFlank) ++ 
-                       "," ++ (BS.unpack . repr . snd $ defaultFlank) ++ "]"
-        cdsbodyDesc = "Inset for footprint positions in the CDS body [" ++
-                      (BS.unpack . repr . fst $ defaultCdsBody) ++ 
-                      "," ++ (BS.unpack . repr . snd $ defaultCdsBody) ++ "]"
-        lengthDesc = "Footprint fragment length range [" ++
-                     (show . fst $ defaultLengths) ++ 
-                     "," ++ (show . snd $ defaultLengths) ++ "]"
-        
-argsToConf :: [Arg] -> Either String Conf
-argsToConf = runReaderT conf
-    where conf = Conf <$> 
-                 findOutput <*>
-                 findBeds <*>
-                 findFlank <*>
-                 findCdsBody <*>
-                 findLengths
-          findOutput = ReaderT $ maybe (Left "No out base") return  . listToMaybe . mapMaybe argOutput
-          findBeds = ReaderT $ return . mapMaybe argBed
-          findFlank = ReaderT $ maybe (return defaultFlank) parseIntPair . listToMaybe . mapMaybe argFlanking
-          findCdsBody = ReaderT $ maybe (return defaultCdsBody) parseIntPair . listToMaybe . mapMaybe argCdsBody
-          findLengths = ReaderT $ maybe (return defaultLengths) parseIntPair . listToMaybe . mapMaybe argLengths
-          
-parseIntPair :: (Integral a) => String -> Either String (a, a)
-parseIntPair = AP.parseOnly intPair . BS.pack
-  where intPair = (,) <$> AP.signed AP.decimal <*> 
-                  (AP.char ',' *> AP.signed AP.decimal <* AP.endOfInput)
+argLengths :: Term (Int, Int)
+argLengths = value $ opt (26, 34) $ (optInfo ["l", "lengths"])
+  { optName = "MINLEN,MAXLEN", optDoc = "Length frange for framing analysis" }
+
+argAnnotate :: Term (Maybe FilePath)
+argAnnotate = value $ opt Nothing $ (optInfo ["a", "annotate"])
+  { optName = "ANNOTATED.BAM", optDoc = "Write output BAM file annotated wiht framing information" }
+
+main :: IO ()
+main = run ( fpframe, info )
+  where fpframe = doFpFraming <$> argConf
+        info = defTI { termName = "fp-framing"
+                     , version = "150304"
+                     , termDoc = "Calculates ribosome profiling QC information -- reading frame bias and start and stop codon meta-genes"
+                     }
