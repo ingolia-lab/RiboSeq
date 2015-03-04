@@ -13,6 +13,7 @@ module Bio.RiboSeq.Framing
 
 import Control.Applicative
 import Control.Monad
+import Data.IORef
 import Data.List
 import Data.Maybe
 import Data.Ord
@@ -174,27 +175,26 @@ data LengthFrame = LengthFrame { lfMinLen :: !Int
                                } deriving (Show)
                    
 data FramingStatsIO = FramingStatsIO { fsioStart, fsioEnd, fsioBody :: !LengthFrameIO
-                                     , fsioBodyStartMin :: Pos.Offset
-                                     , fsioBodyEndMax :: Pos.Offset
+                                     , fsioFailure :: !(UM.IOVector Int)
+                                     , fsioTotal :: !(IORef Int)
                                      }
 
 data FramingStats = FramingStats { fsStart, fsEnd, fsBody :: LengthFrame
-                                 , fsBodyStartMin :: Pos.Offset
-                                 , fsBodyEndMax :: Pos.Offset
+                                 , fsFailure :: !(U.Vector Int)
+                                 , fsTotal :: !Int
                                  } deriving (Show)
 
 fsioNew :: (Pos.Offset, Pos.Offset) ->
            (Pos.Offset, Pos.Offset) ->
-           Pos.Offset -> Pos.Offset ->
            (Int, Int) ->
            IO FramingStatsIO
-fsioNew startBnds endBnds bodyStartMin bodyEndMax lenBnds =
+fsioNew startBnds endBnds lenBnds =
   FramingStatsIO <$>
   lfioNew startBnds lenBnds <*>
   lfioNew endBnds lenBnds <*>
   lfioNew frameBnds lenBnds <*>
-  (pure bodyStartMin) <*>
-  (pure bodyEndMax)
+  UM.replicate (fromEnum (maxBound :: BamFailure)) 0 <*>
+  newIORef 0
   where frameBnds = (0, 2)
 
 fsioFreeze :: FramingStatsIO -> IO FramingStats
@@ -202,22 +202,20 @@ fsioFreeze fsio = FramingStats <$>
                   (lfioFreeze . fsioStart $ fsio) <*>
                   (lfioFreeze . fsioEnd $ fsio) <*>
                   (lfioFreeze . fsioBody $ fsio) <*>
-                  (pure . fsioBodyStartMin $ fsio) <*>
-                  (pure . fsioBodyEndMax $ fsio)
+                  (U.freeze . fsioFailure $ fsio) <*>
+                  (readIORef . fsioTotal $ fsio)
 
--- fsioIncr :: FramingStatsIO -> (Pos.Offset, Pos.Offset) -> Int -> IO (Bool, Bool, Bool)
--- fsioIncr fsio (vsStart, vsEnd) len = do
---   atStart <- lfioIncr (fsioStart fsio) vsStart len
---   atEnd <- lfioIncr (fsioEnd fsio) vsEnd len
---   inBody <- if (vsStart >= fsioBodyStartMin fsio) && (vsEnd <= fsioBodyEndMax fsio)
---             then lfioIncr (fsioBody fsio) (vsStart `mod` 3) len
---             else return False
---   return (atStart, atEnd, inBody)
-
--- | When the location of @bam@ (as per 'Bam.refSeqLoc') lies within
--- the location of @trx@ and on the forward strand, and @trx@ has an
--- annotated CDS, return @Just@ the position of the 5\' end of the hit
--- relative to the CDS.
+fsioIncr :: FramingStatsIO -> BamFraming -> Int -> IO ()
+fsioIncr fsio (Left failure) _len = let failidx = fromEnum failure
+                                    in do modifyIORef' (fsioTotal fsio) succ
+                                          UM.read (fsioFailure fsio) failidx >>= \n0 ->
+                                            UM.write (fsioFailure fsio) failidx $! succ n0
+fsioIncr fsio (Right (mstart, mend, mframe)) len = do
+  modifyIORef' (fsioTotal fsio) succ
+  maybe (return False) (\start -> lfioIncr (fsioStart fsio) start len) mstart
+  maybe (return False) (\end -> lfioIncr (fsioEnd fsio) end len) mend
+  maybe (return False) (\frame -> lfioIncr (fsioBody fsio) frame len) mframe
+  return ()
 
 data BamFailure = BamNoHit
                 | BamMultiHit
