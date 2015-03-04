@@ -17,6 +17,7 @@ import System.Console.CmdTheLine
 import System.IO
 
 import qualified Data.Vector as V
+import qualified Data.Vector.Unboxed as U
 import qualified Data.Conduit as C
 import qualified Data.Conduit.List as C
 
@@ -50,7 +51,7 @@ doFpFraming conf = do
                          Just hout -> do bannot <- Bam.addAuxZ bam tagFraming (framingAux bamfr)
                                          Bam.put1 hout bannot)
   fstats <- fsioFreeze fsio
-  print fstats
+  writeFile ((confOutput conf) ++ "_frame_length.txt") $ frameLenTable (fsBody fstats)
   return ()
   
 tagFraming :: String
@@ -75,42 +76,30 @@ withMaybeBamOutFile conf inHeader f = case confAnnotate conf of
   Nothing -> f Nothing
   Just annotName -> Bam.withBamOutFile annotName inHeader $ \hout -> f (Just hout)
 
--- doFpFraming :: Conf -> IO ()
--- doFpFraming conf = do trstartio <- newTerminus (confFlank conf) (confLengths conf)
---                       trendio <- newTerminus (confFlank conf) (confLengths conf)
---                       frameio <- newFrame (confLengths conf)
---                       let count trx iloc = do countAtStart trstartio trx iloc
---                                               countAtEnd trendio trx iloc
---                                               countInCds (confCdsBody conf) frameio trx iloc
---                       withMany (\bam -> bracket (BamIndex.open bam) (BamIndex.close)) (confBamInputs conf) $ \bidxs ->
---                         mapOverTranscripts (confBeds conf) $ \trx ->
---                         forM_ bidxs $ \bidx -> mapOverBams bidx (count trx) trx
---                       trstart <- freezeTerminus trstartio
---                       trend <- freezeTerminus trendio
---                       frame <- freezeFrame frameio
---                       writeFile (confOutput conf ++ "_start_pos_len.txt") . posLenTable $ trstart
---                       writeFile (confOutput conf ++ "_end_pos_len.txt") . posLenTable $ trend
---                       writeFile (confOutput conf ++ "_frame_len.txt") . frameLenTable $ frame
---                       writeFile (confOutput conf ++ "_asite_report.txt") $ framingTable frame trstart trend
-
-frameLenTable :: Framing -> String
-frameLenTable fr = unlines $ header ++ proflines (frprofile fr)
-  where header = [ unwords [ "# lengths ", show . frminlen $ fr, show . frmaxlen $ fr ]
-                 ]
-        proflines prof = V.toList . V.imap profline $ prof
-          where total = V.sum . V.map V.sum $ prof
-                profline i1 v = let ltotal = V.sum v
-                                    framect f = show $ v V.! f
-                                    framefract f = showfract (v V.! f) ltotal
-                                in unfields $ 
-                                   [ show $ i1 + frminlen fr
-                                   , showfract ltotal total
-                                   ] 
-                                   ++ map framect [0..2]
-                                   ++ map framefract [0..2]
+frameLenTable :: LengthFrame -> String
+frameLenTable fr = unlines $ header : proflines
+  where header = unfields [ "length", "fract", "N0", "N1", "N2", "p0", "p1", "p2", "info" ]
+        proflines = map profline [0..(U.length (lfProfile fr V.! 0) - 1)]
+          where total = V.sum . V.map U.sum . lfProfile $ fr
+                profline l = let ln0 = (lfProfile fr V.! 0) U.! l
+                                 ln1 = (lfProfile fr V.! 1) U.! l
+                                 ln2 = (lfProfile fr V.! 2) U.! l
+                                 lttl = ln0 + ln1 + ln2
+                                 entropy = lengthFrameEntropy ( ln0, ln1, ln2 )
+                                 info = logBase 2 3 - entropy
+                             in unfields $ 
+                                [ show $ l + lfMinLen fr
+                                , showfract lttl total
+                                , show ln0, show ln1, show ln2
+                                , showfract ln0 lttl
+                                , showfract ln1 lttl
+                                , showfract ln2 lttl
+                                , showFFloat (Just 2) info ""
+                                ]
         showfract numer denom = showFFloat (Just 4) fract ""
           where fract :: Double
                 fract = (fromIntegral numer) / (fromIntegral denom)
+
 
 minLenFract :: Double
 minLenFract = 0.05
