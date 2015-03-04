@@ -8,6 +8,14 @@ module Bio.RiboSeq.Framing
        , countInCds
        
        , lenFract, terminusPeak
+
+       , LengthFrameIO, LengthFrame(..)
+       , lfioNew, lfioIncr, lfioFreeze
+       , FramingStatsIO, FramingStats(..)
+       , fsioNew, fsioIncr, fsioFreeze
+       , BamFailure(..), BamFramingResult
+       , FpFailure(..), FpFraming(..), FpFramingResult
+       , bamFraming, fpFraming
        )
        where
 
@@ -72,7 +80,7 @@ freezeTerminus tio = do prof <- V.mapM V.freeze . profile $ tio
                                     , profile = prof
                                     }
 
-countAtStart :: TerminusIO -> Transcript -> Bam.Bam1 -> IO ()
+
 countAtStart mgstart trx = withCds trx $ \cdsloc ->
   onReadContig trx $ \iloc ->
   let ioff = Pos.offset . Loc.startPos $ iloc
@@ -139,11 +147,21 @@ count2D :: V.Vector (VM.IOVector Int) -> Int -> Int -> IO ()
 count2D v i1 i2 = do x <- VM.read (v V.! i1) i2
                      VM.write (v V.! i1) i2 $! succ x
                      
+-- | A 2D profile for the 5\' end position and length of footprints,
+-- for efficient counting in the IO monad.
 data LengthFrameIO = LengthFrameIO { lfioMinLen :: !Int
                                    , lfioMinPos :: !Pos.Offset
                                    , lfioProfile :: !(VM.IOVector (UM.IOVector Int))
                                    }
 
+-- | A 2D profile for the 5\' end position and length of footprints,
+-- with immutable vectors.
+data LengthFrame = LengthFrame { lfMinLen :: !Int
+                               , lfMinPos :: !Pos.Offset
+                               , lfProfile :: !(V.Vector (U.Vector Int))
+                               } deriving (Show)
+
+-- | Freeze an immutable 'LengthFrame' from a 'LengthFrameIO'
 lfioFreeze :: LengthFrameIO -> IO (LengthFrame)
 lfioFreeze lfio = LengthFrame <$>
                   pure (lfioMinLen lfio) <*>
@@ -169,11 +187,6 @@ lfioIncr lfio pos len = if posidx >= 0 && posidx < (VM.length . lfioProfile $ lf
   where posidx = fromIntegral $ pos - (lfioMinPos lfio)
         lenidx = len - (lfioMinLen lfio)
 
-data LengthFrame = LengthFrame { lfMinLen :: !Int
-                               , lfMinPos :: !Pos.Offset
-                               , lfProfile :: !(V.Vector (U.Vector Int))
-                               } deriving (Show)
-                   
 data FramingStatsIO = FramingStatsIO { fsioStart, fsioEnd, fsioBody :: !LengthFrameIO
                                      , fsioFailure :: !(UM.IOVector Int)
                                      , fsioTotal :: !(IORef Int)
@@ -205,16 +218,16 @@ fsioFreeze fsio = FramingStats <$>
                   (U.freeze . fsioFailure $ fsio) <*>
                   (readIORef . fsioTotal $ fsio)
 
-fsioIncr :: FramingStatsIO -> BamFraming -> Int -> IO ()
+fsioIncr :: FramingStatsIO -> BamFramingResult -> Int -> IO ()
 fsioIncr fsio (Left failure) _len = let failidx = fromEnum failure
                                     in do modifyIORef' (fsioTotal fsio) succ
                                           UM.read (fsioFailure fsio) failidx >>= \n0 ->
                                             UM.write (fsioFailure fsio) failidx $! succ n0
-fsioIncr fsio (Right (mstart, mend, mframe)) len = do
+fsioIncr fsio (Right (FpFraming mstart mend mframe)) len = do
   modifyIORef' (fsioTotal fsio) succ
-  maybe (return False) (\start -> lfioIncr (fsioStart fsio) start len) mstart
-  maybe (return False) (\end -> lfioIncr (fsioEnd fsio) end len) mend
-  maybe (return False) (\frame -> lfioIncr (fsioBody fsio) frame len) mframe
+  _ <- maybe (return False) (\start -> lfioIncr (fsioStart fsio) start len) mstart
+  _ <- maybe (return False) (\end -> lfioIncr (fsioEnd fsio) end len) mend
+  _ <- maybe (return False) (\frame -> lfioIncr (fsioBody fsio) frame len) mframe
   return ()
 
 data BamFailure = BamNoHit
@@ -230,24 +243,27 @@ instance Enum BamFailure where
   toEnum 0 = BamNoHit
   toEnum 1 = BamMultiHit
   toEnum n | n >= 2 = BamFpFailure (toEnum $ n - 2)
+           | otherwise = error $ "toEnum(BamFailure) out of range " ++ show n
   fromEnum BamNoHit = 0
   fromEnum BamMultiHit = 1
   fromEnum (BamFpFailure fpf) = 2 + fromEnum fpf
 
-type BamFraming = Either BamFailure (Maybe Pos.Offset, Maybe Pos.Offset, Maybe Pos.Offset)
+type BamFramingResult = Either BamFailure FpFraming
 
 -- | Find the framing of a 'Bam.Bam1' alignment of a footprint. When
 -- the footprint alignment is unique -- i.e., it has a genomic
 -- location as per 'Bam.refSeqLoc' and does not indicate multiple hits
 -- as per 'Bam.nHits' -- then the unique genomic location is used to
 -- determine the framing as per 'fpFraming'.
-bamFraming :: (Pos.Offset, Pos.Offset) -> LM.SeqLocMap Transcript -> Bam.Bam1 -> BamFraming
+bamFraming :: (Pos.Offset, Pos.Offset) -> LM.SeqLocMap Transcript -> Bam.Bam1 -> BamFramingResult
 bamFraming bodyBnds trxmap bam
   | multiHit bam = Left BamMultiHit
   | otherwise = maybe (Left BamNoHit) locFraming . Bam.refSeqLoc $ bam
   where multiHit = maybe False (> 1) . Bam.nHits
         locFraming = either (Left . BamFpFailure) Right . fpFraming bodyBnds trxmap
 
+-- | Enumeration of the various ways in which a footprint alignment
+-- may have no framing information, relative to protein-coding genes.
 data FpFailure = FpNoGene
                | FpNoncodingOnly
                | FpNoncodingOverlap
@@ -256,7 +272,16 @@ data FpFailure = FpNoGene
                | FpAmbigFrame
                deriving (Show, Ord, Eq, Bounded, Enum)
 
-type FpFraming = Either FpFailure (Maybe Pos.Offset, Maybe Pos.Offset, Maybe Pos.Offset)
+-- | Framing information for a footprint alignment, giving an offset
+-- relative to the start and the end of the reading frame as well as
+-- the position within the reading frame. In the presence of multiple
+-- transcript isoforms, some of these values may be 'Nothing' when
+-- several different results would arise from different isoforms.
+data FpFraming = FpFraming { fpVsStart, fpVsEnd, fpReadingFrame :: !(Maybe Pos.Offset) } deriving (Show)
+
+-- | Result of framing analysis of a footprint alignment, indicating
+-- either the calculated frame in 'FpFraming' or an 'FpFailure'.
+type FpFramingResult = Either FpFailure FpFraming
 
 groupByGene :: [Transcript] -> [[Transcript]]
 groupByGene = groupBy sameGene
@@ -287,7 +312,7 @@ isCoding = isJust . cds
 -- When all 'Transcript' objects overlapping the query @fpLoc@ share
 -- the same 'geneId' and at least one of them is coding (i.e., has a
 -- 'cds') then the framing is computed as per 'geneFraming'.
-fpFraming :: (Pos.Offset, Pos.Offset) -> LM.SeqLocMap Transcript -> SpliceSeqLoc -> FpFraming
+fpFraming :: (Pos.Offset, Pos.Offset) -> LM.SeqLocMap Transcript -> SpliceSeqLoc -> FpFramingResult
 fpFraming bodyBnds trxmap fploc = case groupByGene $ LM.queryLocatable (Just Plus) fploc trxmap of
   [] -> Left FpNoGene
   [trxs] -> case filter isCoding trxs of
@@ -329,7 +354,7 @@ fpFraming bodyBnds trxmap fploc = case groupByGene $ LM.queryLocatable (Just Plu
 -- lies within the body of at least one transcript, and 'Nothing' if
 -- it is not the body of any transcript; note that ambiguity in the
 -- reading frame leads to an 'FpAmbigFrame' failure.
-geneFraming :: (Pos.Offset, Pos.Offset) -> [Transcript] -> SpliceSeqLoc -> FpFraming
+geneFraming :: (Pos.Offset, Pos.Offset) -> [Transcript] -> SpliceSeqLoc -> FpFramingResult
 geneFraming (bodyStartMin, bodyEndMax) codings fploc =
   case mapMaybe (cdsRelIntoTranscript fploc) codings of
     [] -> Left FpNoCompatible
@@ -337,8 +362,8 @@ geneFraming (bodyStartMin, bodyEndMax) codings fploc =
                    vsEnd = maybeAllSame . map snd $ termini
                    frames = mapMaybe cdsRelToFrame termini
                in case group frames of
-                 [] -> Right ( vsStart, vsEnd, Nothing )
-                 [(fr:_)] -> Right ( vsStart, vsEnd, Just fr )
+                 [] -> Right $! FpFraming { fpVsStart = vsStart, fpVsEnd = vsEnd, fpReadingFrame = Nothing }
+                 [(fr:_)] -> Right $! FpFraming { fpVsStart = vsStart, fpVsEnd = vsEnd, fpReadingFrame = Just fr }
                  _ -> Left FpAmbigFrame
   where cdsRelToFrame (vsStart, vsEnd)
           | (vsStart >= bodyStartMin) && (vsEnd <= bodyEndMax) = Just $! vsStart `mod` 3
@@ -364,6 +389,7 @@ cdsRelIntoTranscript fploc trx = do fpinto <- spliceSeqLocIntoContig fploc $ loc
 -- outer) == 'unOnSeq' loc@. When the reference sequence names don't
 -- match, or when the query location is not a contiguous sublocation
 -- of the outer location, then 'Nothing' is returned.
+spliceSeqLocIntoContig :: (Loc.Location l) => SpliceSeqLoc -> OnSeq l -> Maybe Loc.ContigLoc
 spliceSeqLocIntoContig (OnSeq spref sploc) (OnSeq outref outloc)
   | spref /= outref = Nothing
   | otherwise = sploc `SpLoc.locInto` outloc >>= toSingleContig
