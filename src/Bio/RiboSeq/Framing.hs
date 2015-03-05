@@ -206,7 +206,7 @@ fsioNew startBnds endBnds lenBnds =
   lfioNew startBnds lenBnds <*>
   lfioNew endBnds lenBnds <*>
   lfioNew frameBnds lenBnds <*>
-  UM.replicate (fromEnum (maxBound :: BamFailure)) 0 <*>
+  UM.replicate (1 + fromEnum (maxBound :: BamFailure)) 0 <*>
   newIORef 0
   where frameBnds = (0, 2)
 

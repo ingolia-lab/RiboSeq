@@ -54,6 +54,7 @@ doFpFraming conf = do
   writeFile ((confOutput conf) ++ "_frame_length.txt") $ frameLenTable (fsBody fstats)
   writeFile ((confOutput conf) ++ "_around_start.txt") $ metagene2D (fsStart fstats)
   writeFile ((confOutput conf) ++ "_around_end.txt") $ metagene2D (fsEnd fstats)
+  writeFile ((confOutput conf) ++ "_framing_stats.txt") $ framingStats fstats
   return ()
   
 tagFraming :: String
@@ -119,16 +120,14 @@ metagene2D fr = unlines $ header : proflines
                                 (show $ p + minpos) : 
                                 map show ( vttl : U.toList vpos )
 
-posLenTable :: Terminus -> String
-posLenTable tr = unlines $ header ++ proflines (profile tr)
-  where header = [ unwords [ "# positions ", show . Pos.unOff .  before $ tr, show . Pos.unOff . after $ tr]
-                 , unwords [ "# lengths ", show . minlen $ tr, show . maxlen $ tr ]
-                 ]        
-        proflines = V.toList . V.imap profline
-        b = fromIntegral . before $ tr
-        profline i1 v = unfields $ (show $ i1 + b) : show ttl : (V.toList . V.map show $ v)
-          where ttl = V.sum v
-
+framingStats :: FramingStats -> String
+framingStats fstats = unlines . map unfields $ stats
+  where stats = [ [ "TOTAL", show . fsTotal $ fstats ]
+                , [ "Start", show . V.sum . V.map U.sum . lfProfile . fsStart $ fstats ]
+                , [ "Body",  show . V.sum . V.map U.sum . lfProfile . fsBody  $ fstats ]
+                , [ "End",   show . V.sum . V.map U.sum . lfProfile . fsEnd   $ fstats ]
+                ] ++
+                [ [ show bf, show ( fsFailure fstats U.! (fromEnum bf) ) ] | (bf :: BamFailure) <- [minBound..maxBound] ]
 
 unfields :: [String] -> String
 unfields = intercalate "\t"
