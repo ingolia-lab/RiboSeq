@@ -4,14 +4,10 @@ module Main
        where 
 
 import Control.Applicative
-import Control.Exception
 import Control.Monad.Reader
 import Control.Monad.Trans.Resource
 import qualified Data.ByteString.Char8 as BS
-import Data.List (intercalate, maximumBy)
-import Data.Maybe
-import Data.Ord
-import Foreign.Marshal.Utils
+import Data.List (intercalate)
 import Numeric
 import System.Console.CmdTheLine
 import System.IO
@@ -25,14 +21,11 @@ import qualified Bio.SamTools.Bam as Bam
 import qualified Bio.SamTools.Conduit as Bam
 
 import Bio.SeqLoc.Bed
-import qualified Bio.SamTools.BamIndex as BamIndex
 import qualified Bio.SeqLoc.LocMap as SLM
-import Bio.SeqLoc.LocRepr
 import Bio.SeqLoc.OnSeq
 import qualified Bio.SeqLoc.Position as Pos
 import Bio.SeqLoc.Transcript
 
-import Bio.RiboSeq.BamFile
 import Bio.RiboSeq.Framing
 
 doFpFraming :: Conf -> IO ()
@@ -43,7 +36,11 @@ doFpFraming conf = do
     withMaybeBamOutFile conf (Bam.inHeader hin) $ \mhout ->
     runResourceT $ C.runConduit $
     Bam.sourceHandle hin C.$$
-    C.mapM_ (\bam -> let bamfr = bamFraming (confCdsBody conf) trxmap bam
+    C.mapM_ (\bam -> let bamfr = case liftM fromIntegral $ Bam.queryLength bam of
+                           Nothing -> Left $ BamNoHit
+                           Just len | len < confMinLength conf -> Left $ BamTooShort
+                                    | len > confMaxLength conf -> Left $ BamTooLong
+                                    | otherwise -> bamFraming (confCdsBody conf) trxmap bam
                      in liftIO $ do
                        fsioIncr fsio bamfr (maybe (-1) fromIntegral $ Bam.queryLength bam)
                        case mhout of
@@ -60,7 +57,9 @@ doFpFraming conf = do
 tagFraming :: String
 tagFraming = "ZF"
 
-framingAux (Left err) = show err
+framingAux :: BamFramingResult -> String
+framingAux (Left (BamFpFailure bf)) = show bf
+framingAux (Left bf) = show bf
 framingAux (Right (FpFraming start end frame gene))
   = intercalate "/" [ BS.unpack . unSeqLabel $ gene, showmz start, showmz end, showmz frame ]
   where showmz (Just z) = showSigned showInt 0 z ""
@@ -151,6 +150,11 @@ data Conf = Conf { confBamInput :: !FilePath
                  , confLengths :: !(Int, Int)
                  , confAnnotate :: !(Maybe FilePath)
                  } deriving (Show)
+
+confMinLength :: Conf -> Int
+confMaxLength :: Conf -> Int
+confMinLength = fst . confLengths
+confMaxLength = snd . confLengths
 
 argConf :: Term Conf
 argConf = Conf <$>

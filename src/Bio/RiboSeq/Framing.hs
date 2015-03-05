@@ -41,6 +41,9 @@ data LengthFrame = LengthFrame { lfMinLen :: !Int
                                , lfProfile :: !(V.Vector (U.Vector Int))
                                } deriving (Show)
 
+lfMaxLen :: LengthFrame -> Int
+lfMaxLen lf = (lfMinLen lf) + (U.length (lfProfile lf V.! 0) - 1)
+
 -- | Freeze an immutable 'LengthFrame' from a 'LengthFrameIO'
 lfioFreeze :: LengthFrameIO -> IO (LengthFrame)
 lfioFreeze lfio = LengthFrame <$>
@@ -110,7 +113,9 @@ fsioIncr fsio (Right (FpFraming mstart mend mframe _gene)) len = do
   _ <- maybe (return False) (\frame -> lfioIncr (fsioBody fsio) frame len) mframe
   return ()
 
-data BamFailure = BamNoHit
+data BamFailure = BamTooShort
+                | BamTooLong
+                | BamNoHit
                 | BamMultiHit
                 | BamFpFailure !FpFailure
                 deriving (Show, Ord, Eq)
@@ -120,16 +125,20 @@ instance Bounded BamFailure where
   maxBound = BamFpFailure maxBound
 
 instance Enum BamFailure where
-  toEnum 0 = BamNoHit
-  toEnum 1 = BamMultiHit
-  toEnum n | n >= 2 = BamFpFailure (toEnum $ n - 2)
+  toEnum 0 = BamTooShort
+  toEnum 1 = BamTooLong
+  toEnum 2 = BamNoHit
+  toEnum 3 = BamMultiHit
+  toEnum n | n >= 4 = BamFpFailure (toEnum $ n - 4)
            | otherwise = error $ "toEnum(BamFailure) out of range " ++ show n
-  fromEnum BamNoHit = 0
-  fromEnum BamMultiHit = 1
-  fromEnum (BamFpFailure fpf) = 2 + fromEnum fpf
+  fromEnum BamTooShort = 0
+  fromEnum BamTooLong  = 1
+  fromEnum BamNoHit    = 2
+  fromEnum BamMultiHit = 3
+  fromEnum (BamFpFailure fpf) = 4 + fromEnum fpf
 
 badAlignment :: [BamFailure]
-badAlignment = [ BamNoHit, BamMultiHit ]
+badAlignment = [ BamTooShort, BamTooLong, BamNoHit, BamMultiHit ]
 
 badAnnotation :: [BamFailure]
 badAnnotation = [ BamFpFailure fp | fp <- [minBound..maxBound] ]

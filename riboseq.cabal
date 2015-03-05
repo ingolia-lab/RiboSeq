@@ -59,8 +59,7 @@ Executable rrna-stats
 
 Executable fp-framing
   Main-Is:             FpFraming.hs
-  Other-Modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.Counting,
-                       Bio.RiboSeq.BamFile, Bio.RiboSeq.Framing
+  Other-Modules:       Bio.RiboSeq.Framing
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, resourcet, conduit, cmdtheline,
                        transformers, monads-tf, vector, hashable, unordered-containers,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee, samtools-conduit
