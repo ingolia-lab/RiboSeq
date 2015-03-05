@@ -122,12 +122,23 @@ metagene2D fr = unlines $ header : proflines
 
 framingStats :: FramingStats -> String
 framingStats fstats = unlines . map unfields $ stats
-  where stats = [ [ "TOTAL", show . fsTotal $ fstats ]
-                , [ "Start", show . V.sum . V.map U.sum . lfProfile . fsStart $ fstats ]
-                , [ "Body",  show . V.sum . V.map U.sum . lfProfile . fsBody  $ fstats ]
-                , [ "End",   show . V.sum . V.map U.sum . lfProfile . fsEnd   $ fstats ]
-                ] ++
-                [ [ show bf, show ( fsFailure fstats U.! (fromEnum bf) ) ] | (bf :: BamFailure) <- [minBound..maxBound] ]
+  where stats = concat
+                [ [ [ "TOTAL", "", show . fsTotal $ fstats ] ]
+                , [ [ "", show bf, show ( fsFailure fstats U.! (fromEnum bf) ) ] | bf <- badAlignment ]
+                , [ [ "BadAlignment",  "", show badAlignCount ]
+                  , [ "GoodAlignment", "", show goodAlignCount ] ]
+                , [ [ "", drop 2 $ show ff, show ( fsFailure fstats U.! (fromEnum $ BamFpFailure ff) ) ] | ff <- [minBound..maxBound] ]
+                , [ [ "BadAnnotation",  "", show badAnnotCount ]
+                  , [ "GoodAnnotation", "", show goodAnnotCount ] ]                  
+                , [ [],
+                    [ "Start", show . V.sum . V.map U.sum . lfProfile . fsStart $ fstats ]
+                  , [ "Body",  show . V.sum . V.map U.sum . lfProfile . fsBody  $ fstats ]
+                  , [ "End",   show . V.sum . V.map U.sum . lfProfile . fsEnd   $ fstats ] ]
+                ]
+        badAlignCount = sum [ (fsFailure fstats) U.! (fromEnum bf) | bf <- badAlignment ]
+        goodAlignCount = (fsTotal fstats) - badAlignCount
+        badAnnotCount = sum [ (fsFailure fstats) U.! (fromEnum bf) | bf <- badAnnotation ]
+        goodAnnotCount = goodAlignCount - badAnnotCount
 
 unfields :: [String] -> String
 unfields = intercalate "\t"

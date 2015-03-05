@@ -13,7 +13,7 @@ module Bio.RiboSeq.Framing
        , lfioNew, lfioIncr, lfioFreeze
        , FramingStatsIO, FramingStats(..)
        , fsioNew, fsioIncr, fsioFreeze
-       , BamFailure(..), BamFramingResult
+       , BamFailure(..), BamFramingResult, badAlignment, badAnnotation
        , FpFailure(..), FpFraming(..), FpFramingResult
        , bamFraming, fpFraming
        )
@@ -247,6 +247,12 @@ instance Enum BamFailure where
   fromEnum BamNoHit = 0
   fromEnum BamMultiHit = 1
   fromEnum (BamFpFailure fpf) = 2 + fromEnum fpf
+
+badAlignment :: [BamFailure]
+badAlignment = [ BamNoHit, BamMultiHit ]
+
+badAnnotation :: [BamFailure]
+badAnnotation = [ BamFpFailure fp | fp <- [minBound..maxBound] ]
 
 type BamFramingResult = Either BamFailure FpFraming
 
