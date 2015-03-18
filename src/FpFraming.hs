@@ -8,10 +8,12 @@ import Control.Monad.Reader
 import Control.Monad.Trans.Resource
 import qualified Data.ByteString.Char8 as BS
 import Data.List (intercalate)
+import Data.Maybe
 import Numeric
 import System.Console.CmdTheLine
 import System.IO
 
+import qualified Data.HashMap.Strict as HM
 import qualified Data.Vector as V
 import qualified Data.Vector.Unboxed as U
 import qualified Data.Conduit as C
@@ -67,12 +69,30 @@ framingAux (Right (FpFraming start end frame gene))
 
 readAnnotMap :: Conf -> IO (SLM.SeqLocMap Transcript)
 readAnnotMap conf = do
-  trxs <- concat <$> mapM readBedTranscripts (confBeds conf)
-  let trxmap = SLM.locatableSeqLocMap defaultBinSize trxs
-  hPutStrLn stderr $! "Read " ++ show (length trxs) ++ " annotations from " ++ show (confBeds conf)
+  trxsRaw <- concat <$> mapM readBedTranscripts (confBedFiles conf)
+  hPutStrLn stderr $! "Read " ++ show (length trxsRaw) ++ " annotations from " ++ show (confBedFiles conf)
+  trxToGene <- mapM BS.readFile (confGeneFiles conf) >>=
+               parseGeneMap . concat . map BS.lines
+  hPutStrLn stderr $! "Read " ++ show (HM.size trxToGene) ++ " transcript-to-gene mappings from " ++ show (confGeneFiles conf)
+  let trxs = mapMaybe (remapGenes trxToGene) trxsRaw
+      ngene = HM.size . HM.fromList . map (\t -> (geneId t, ())) $ trxs
+  hPutStrLn stderr $! "After remapping " ++ (show ngene) ++ " distinct genes in " ++ (show $ length trxs) ++ " transcripts"
+  let trxmap = SLM.locatableSeqLocMap (confBinSize conf) trxs
   return $! trxmap
-  where defaultBinSize = 100000
-
+  where parseGeneMap ls = (HM.fromList . catMaybes) <$> mapM parseGeneMapping ls
+        parseGeneMapping l
+          | BS.null l = return Nothing
+          | BS.isPrefixOf "#" l = return Nothing
+          | otherwise = case BS.split '\t' l of
+            [trxid,geneid] -> return . Just $! (BS.copy trxid, Just $ BS.copy geneid)
+            [trxid] -> return . Just $! (BS.copy trxid, Nothing)
+            _ -> do hPutStrLn stderr $ "Malformed transcript-to-gene mapping " ++ show l
+                    return Nothing
+        remapGenes trxToGene t = case HM.lookup (unSeqLabel . trxId $ t) trxToGene of
+          Nothing -> Just t
+          Just Nothing -> Nothing
+          Just (Just g) -> Just $! t { geneId = toSeqLabel g }
+        
 withMaybeBamOutFile :: Conf -> Bam.Header -> (Maybe Bam.OutHandle -> IO ()) -> IO ()
 withMaybeBamOutFile conf inHeader f = case confAnnotate conf of
   Nothing -> f Nothing
@@ -144,11 +164,13 @@ unfields = intercalate "\t"
 
 data Conf = Conf { confBamInput :: !FilePath
                  , confOutput :: !(FilePath) 
-                 , confBeds :: ![FilePath]
+                 , confBedFiles :: ![FilePath]
+                 , confGeneFiles :: ![FilePath]
                  , confFlank :: !(Pos.Offset, Pos.Offset)
                  , confCdsBody :: !(Pos.Offset, Pos.Offset)
                  , confLengths :: !(Int, Int)
                  , confAnnotate :: !(Maybe FilePath)
+                 , confBinSize :: !Pos.Offset
                  } deriving (Show)
 
 confMinLength :: Conf -> Int
@@ -161,10 +183,12 @@ argConf = Conf <$>
           argBamInput <*>
           argOutput <*>
           argBedFiles <*>
+          argGeneFiles <*>
           argFlank <*>
           argBody <*>
           argLengths <*>
-          argAnnotate
+          argAnnotate <*>
+          argBinSize
 
 instance ArgVal Pos.Offset where
   converter = let (intParser :: ArgParser Int, intPrinter :: ArgPrinter Int) = converter
@@ -190,6 +214,10 @@ argBedFiles :: Term [FilePath]
 argBedFiles = nonEmpty $ optAll [] $ (optInfo ["b", "bed"])
   { optName = "BED", optDoc = "BED-format annotation filename" }
 
+argGeneFiles :: Term [FilePath]
+argGeneFiles = value $ optAll [] $ (optInfo ["g", "genes"])
+  { optName = "GENES.TXT", optDoc = "Tab-delimited table of Transcript<TAB>Gene (or just Transcript to suppress a transcript)" }
+
 argFlank :: Term (Pos.Offset, Pos.Offset)
 argFlank = value $ opt (-100, 100) $ (optInfo ["f", "flanking"])
   { optName = "START,END", optDoc = "Range of profiles surrounding the start and end codons" }
@@ -206,10 +234,17 @@ argAnnotate :: Term (Maybe FilePath)
 argAnnotate = value $ opt Nothing $ (optInfo ["a", "annotate"])
   { optName = "ANNOTATED.BAM", optDoc = "Write output BAM file annotated wiht framing information" }
 
+argBinSize :: Term Pos.Offset
+argBinSize = value $ opt 100000 $ (optInfo ["z", "binsize"])
+  { optName = "BINSIZE", optDoc = "Bin size for transcript lookup map" }
+
 main :: IO ()
 main = run ( fpframe, info )
   where fpframe = doFpFraming <$> argConf
         info = defTI { termName = "fp-framing"
                      , version = "150304"
-                     , termDoc = "Calculates ribosome profiling QC information -- reading frame bias and start and stop codon meta-genes"
+                     , termDoc = "Calculates ribosome profiling QC information including reading frame bias and start and stop codon meta-genes"
+                     , man = map P [ "Calculates quality control statistics from ribosome profiling data. These QC information are reported in four distinct data files that summarize results from mapping footprint alignments onto protein-coding gene annotations. Individual footprints can also be annotated with QC classifications in a BAM file output."
+                                   , ""
+                                   ]
                      }
