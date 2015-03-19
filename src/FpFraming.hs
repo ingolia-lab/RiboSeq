@@ -118,9 +118,6 @@ frameLenTable fr = unlines $ header : proflines
                                 , showfract ln2 lttl
                                 , showFFloat (Just 2) info ""
                                 ]
-        showfract numer denom = showFFloat (Just 4) fract ""
-          where fract :: Double
-                fract = (fromIntegral numer) / (fromIntegral denom)
 
 lengthFrameEntropy :: (Int, Int, Int) -> Double
 lengthFrameEntropy (n0, n1, n2) = negate . sum $ map nEntropy [n0, n1, n2] 
@@ -143,12 +140,19 @@ framingStats :: FramingStats -> String
 framingStats fstats = unlines . map unfields $ stats
   where stats = concat
                 [ [ [ "TOTAL", "", show . fsTotal $ fstats ] ]
-                , [ [ "", show bf, show ( fsFailure fstats U.! (fromEnum bf) ) ] | bf <- badAlignment ]
-                , [ [ "BadAlignment",  "", show badAlignCount ]
-                  , [ "GoodAlignment", "", show goodAlignCount ] ]
-                , [ [ "", drop 2 $ show ff, show ( fsFailure fstats U.! (fromEnum $ BamFpFailure ff) ) ] | ff <- [minBound..maxBound] ]
-                , [ [ "BadAnnotation",  "", show badAnnotCount ]
-                  , [ "GoodAnnotation", "", show goodAnnotCount ] ]                  
+                , [ [ "", show bf,
+                      show (fsFailure fstats U.! (fromEnum bf)),
+                      showfract  (fsFailure fstats U.! (fromEnum bf)) (fsTotal fstats) ]
+                  | bf <- badAlignment ]
+                , [ [ "BadAlignment",  "", show badAlignCount, showfract badAlignCount (fsTotal fstats) ]
+                  , [ "GoodAlignment", "", show goodAlignCount, showfract goodAlignCount (fsTotal fstats) ] ]
+                , [ [ "", drop 2 $ show ff,
+                      show (fsFailure fstats U.! (fromEnum $ BamFpFailure ff)),
+                      showfract (fsFailure fstats U.! (fromEnum $ BamFpFailure ff)) (fsTotal fstats),
+                      showfract (fsFailure fstats U.! (fromEnum $ BamFpFailure ff)) goodAlignCount ]
+                  | ff <- [minBound..maxBound] ]
+                , [ [ "BadAnnotation",  "", show badAnnotCount, showfract badAnnotCount (fsTotal fstats), showfract badAnnotCount goodAlignCount ]
+                  , [ "GoodAnnotation", "", show goodAnnotCount, showfract goodAnnotCount (fsTotal fstats), showfract goodAnnotCount goodAlignCount ] ]                  
                 , [ [],
                     [ "Start", show . V.sum . V.map U.sum . lfProfile . fsStart $ fstats ]
                   , [ "Body",  show . V.sum . V.map U.sum . lfProfile . fsBody  $ fstats ]
@@ -158,6 +162,11 @@ framingStats fstats = unlines . map unfields $ stats
         goodAlignCount = (fsTotal fstats) - badAlignCount
         badAnnotCount = sum [ (fsFailure fstats) U.! (fromEnum bf) | bf <- badAnnotation ]
         goodAnnotCount = goodAlignCount - badAnnotCount
+
+showfract :: Int -> Int -> String
+showfract numer denom = showFFloat (Just 4) fract ""
+  where fract :: Double
+        fract = (fromIntegral numer) / (fromIntegral denom)
 
 unfields :: [String] -> String
 unfields = intercalate "\t"
@@ -245,6 +254,7 @@ main = run ( fpframe, info )
                      , version = "150304"
                      , termDoc = "Calculates ribosome profiling QC information including reading frame bias and start and stop codon meta-genes"
                      , man = map P [ "Calculates quality control statistics from ribosome profiling data. These QC information are reported in four distinct data files that summarize results from mapping footprint alignments onto protein-coding gene annotations. Individual footprints can also be annotated with QC classifications in a BAM file output."
-                                   , ""
+                                   , "Two files contain a 2-D metagene analysis of footprints around the start and the end of protein-coding genes. These meta-genes include all footprints whose length falls within the range specified by \"lengths\". The \"flanking\" argument indicates the range of positions included in the metagene. For each position (listed in the first column), the second column gives the total number of footprints starting at that position, and the following columns give the number at each individual length, increasing. In the start metagene, written in OUTPUT_around_start.txt, 0 is the first nucleotide of the start codon. In the end metagene, written in OUTPUT_around_end.txt, 0 is the _first_ nucleotide of the stop codon (a change from earlier programs!)."
+                                   , "One file contains a table of reading frame position for footprints falling within the CDS of protein-coding genes. The region within the CDS is given by the \"cdsbody\" argument and ensures that the start of the footprint is at least AFTERSTART past the start codon while the end of the footprint is at least BEFOREEND from the stop codon. Each row provides statistics for one footprint length within the range of lengths in the \"lengths\" argument. The \"fract\" column indicates the fraction of all considered footprints at that specific length; the \"N0\", \"N1\", and \"N2\" columns give the count of footprints whose 5\' end is on the first, second, or third nucleotide of a codon; the \""
                                    ]
                      }
