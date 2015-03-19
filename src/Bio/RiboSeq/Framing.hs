@@ -150,11 +150,12 @@ type BamFramingResult = Either BamFailure FpFraming
 -- location as per 'Bam.refSeqLoc' and does not indicate multiple hits
 -- as per 'Bam.nHits' -- then the unique genomic location is used to
 -- determine the framing as per 'fpFraming'.
-bamFraming :: (Pos.Offset, Pos.Offset) -> LM.SeqLocMap Transcript -> Bam.Bam1 -> BamFramingResult
-bamFraming bodyBnds trxmap bam
-  | multiHit bam = Left BamMultiHit
+bamFraming :: Bool -> (Pos.Offset, Pos.Offset) -> LM.SeqLocMap Transcript -> Bam.Bam1 -> BamFramingResult
+bamFraming multiFirst bodyBnds trxmap bam
+  | not (singleHit bam) = Left BamMultiHit
   | otherwise = maybe (Left BamNoHit) locFraming . Bam.refSeqLoc $ bam
-  where multiHit = maybe False (> 1) . Bam.nHits
+  where singleHit b = let isFirst = maybe False (== 0) $ Bam.auxGeti b "HI"
+                      in maybe True (\nh -> (nh == 1) || (multiFirst && isFirst)) $ Bam.nHits b
         locFraming = either (Left . BamFpFailure) Right . fpFraming bodyBnds trxmap
 
 -- | Enumeration of the various ways in which a footprint alignment

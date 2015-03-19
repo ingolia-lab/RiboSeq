@@ -42,7 +42,7 @@ doFpFraming conf = do
                            Nothing -> Left $ BamNoHit
                            Just len | len < confMinLength conf -> Left $ BamTooShort
                                     | len > confMaxLength conf -> Left $ BamTooLong
-                                    | otherwise -> bamFraming (confCdsBody conf) trxmap bam
+                                    | otherwise -> bamFraming (confMultiFirst conf) (confCdsBody conf) trxmap bam
                      in liftIO $ do
                        fsioIncr fsio bamfr (maybe (-1) fromIntegral $ Bam.queryLength bam)
                        case mhout of
@@ -180,6 +180,7 @@ data Conf = Conf { confBamInput :: !FilePath
                  , confLengths :: !(Int, Int)
                  , confAnnotate :: !(Maybe FilePath)
                  , confBinSize :: !Pos.Offset
+                 , confMultiFirst :: !Bool
                  } deriving (Show)
 
 confMinLength :: Conf -> Int
@@ -197,7 +198,8 @@ argConf = Conf <$>
           argBody <*>
           argLengths <*>
           argAnnotate <*>
-          argBinSize
+          argBinSize <*>
+          argMultiFirst
 
 instance ArgVal Pos.Offset where
   converter = let (intParser :: ArgParser Int, intPrinter :: ArgPrinter Int) = converter
@@ -246,6 +248,10 @@ argAnnotate = value $ opt Nothing $ (optInfo ["a", "annotate"])
 argBinSize :: Term Pos.Offset
 argBinSize = value $ opt 100000 $ (optInfo ["z", "binsize"])
   { optName = "BINSIZE", optDoc = "Bin size for transcript lookup map" }
+
+argMultiFirst :: Term Bool
+argMultiFirst = value $ flag $ (optInfo [ "m", "count-multi"])
+  { optDoc = "Count multi-mapping reads once, at their first occurrence (i.e., HI = 0)" }
 
 main :: IO ()
 main = run ( fpframe, info )
