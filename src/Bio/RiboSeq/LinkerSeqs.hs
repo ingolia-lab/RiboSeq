@@ -91,11 +91,11 @@ mismatches :: BS.ByteString -> [BS.ByteString]
 mismatches s = concatMap mmat [0..(BS.length s - 1)]
   where mmat i = let before = BS.take i s
                      after = BS.drop (i + 1) s
-                 in [ BS.concat [ before, BS.singleton ch, after] | ch <- "ACGT", ch /= BS.index s i ]
+                 in [ BS.concat [ before, BS.singleton ch, after] | ch <- "ACGTN", ch /= BS.index s i ]
 
 toIndex :: BS.ByteString -> Index
 toIndex = BS.foldl' idxch 0
-  where idxch i0 ch = let !i' = i0 * 4
+  where idxch i0 ch = let !i' = i0 * 5
                           !ich = case ch of
                                   'a' -> 0
                                   'A' -> 0
@@ -105,6 +105,8 @@ toIndex = BS.foldl' idxch 0
                                   'G' -> 2
                                   't' -> 3
                                   'T' -> 3
+                                  'n' -> 4
+                                  'N' -> 4
                                   _ -> error $ "toIndex: Bad nucleotide " ++ show ch
                       in i' + ich
 
@@ -113,21 +115,22 @@ fromIndex len idx = BS.reverse $! BS.unfoldr go (len, idx)
   where go :: (Int, Index) -> Maybe (Char, (Int, Index))
         go (0, rest) | rest == 0 = Nothing
                      | otherwise = error $ "fromIndex: Residual " ++ show rest ++ " from " ++ show (len, idx)
-        go (l, x) = let (x', ch) = x `divMod` 4
+        go (l, x) = let (x', ch) = x `divMod` 5
                     in Just (case ch of
                               0 -> 'A'
                               1 -> 'C'
                               2 -> 'G'
                               3 -> 'T'
-                              _ -> error $ "fromIndex: Bad result " ++ show (x', ch) ++ " from " ++ show x ++ " divMod 4"
+                              4 -> 'N'
+                              _ -> error $ "fromIndex: Bad result " ++ show (x', ch) ++ " from " ++ show x ++ " divMod 5"
                              , ((l - 1), x'))
                         
 
 maxIndex :: Int -> Index
-maxIndex len = (4 ^ len) - 1
+maxIndex len = (5 ^ len) - 1
 
 lenIndex :: Int -> Int
-lenIndex len = 4 ^ len
+lenIndex len = 5 ^ len
 
 countSeq :: UM.IOVector Int -> BS.ByteString -> IO ()
 countSeq ctvec sequ | UM.length ctvec >= lenIndex (BS.length sequ)
