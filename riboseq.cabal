@@ -62,7 +62,7 @@ Executable fp-framing
   Other-Modules:       Bio.RiboSeq.Framing
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, resourcet, conduit, cmdtheline,
                        transformers, monads-tf, vector, hashable, unordered-containers,
-                       seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee, samtools-conduit
+                       seqloc, seqloc-datafiles >= 0.4.2, samtools >= 0.1.2, samtools-iteratee, samtools-conduit
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -Wall
   Default-Language:    Haskell2010
@@ -206,7 +206,7 @@ Executable yassour-uorf
   Main-Is:             YassourUorf.hs
   Other-modules:       Bio.RiboSeq.CodonAssignment
   Build-depends:       base, bytestring, filepath, process, unix, directory, attoparsec >= 0.8.5, iteratee,
-                       transformers, monads-tf, vector,
+                       transformers, monads-tf, vector, cmdtheline,
                        seqloc, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   Ghc-options:          -auto-all -O2 -Wall

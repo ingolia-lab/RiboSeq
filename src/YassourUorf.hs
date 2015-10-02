@@ -3,8 +3,6 @@
 module Main
        where 
 
-import Debug.Trace
-
 import Control.Applicative
 import Control.Exception
 import Control.Monad.Reader
@@ -13,15 +11,11 @@ import Data.Char
 import Data.List
 import Data.Maybe
 import Numeric
-import System.Console.GetOpt
-import System.Environment
+import System.Console.CmdTheLine
 import System.FilePath
 import System.IO
 
 import qualified Data.Vector.Unboxed as U
-
-import qualified Data.Attoparsec as AP
-import qualified Data.Attoparsec.Char8 as AP
 
 import qualified Bio.SamTools.BamIndex as BamIndex
 import qualified Bio.SeqLoc.Bed as Bed
@@ -35,24 +29,14 @@ import Bio.SeqLoc.Transcript
 import Bio.RiboSeq.BamFile
 import Bio.RiboSeq.CodonAssignment
 
-main :: IO ()
-main = getArgs >>= handleOpt . getOpt RequireOrder optDescrs
-    where handleOpt (_,    _,         errs@(_:_)) = usage (unlines errs)
-          handleOpt (args, [bam], []) = either usage (doYassourUorf bam) $ argsToConf args
-          handleOpt (_,    _,     []) = usage "Specify just one sorted, indexed BAM file"
-          usage errs = do prog <- getProgName
-                          let progline = prog ++ " [OPTIONS] <BAM>"
-                          hPutStr stderr $ usageInfo progline optDescrs
-                          hPutStrLn stderr errs
-
-doYassourUorf :: FilePath -> Conf -> IO ()
-doYassourUorf bam conf = do asites <- readASiteDelta $ confASite conf
-                            bracket (BamIndex.open bam) BamIndex.close $ \bidx ->
-                              withFile (confOutput conf) WriteMode $ \hout ->
-                              withFile (confOutProfiles conf) WriteMode $ \hprof ->
-                              withFile (confOutBed conf) WriteMode $ \hbed ->
-                              mapOverTranscripts (confBeds conf) $ \trx ->
-                              doTranscript conf asites bidx trx hout hprof hbed
+doYassourUorf :: Conf -> IO ()
+doYassourUorf conf = do asites <- readASiteDelta $ confASite conf
+                        bracket (BamIndex.open $ confBamInput conf) BamIndex.close $ \bidx ->
+                          withFile (confOutput conf) WriteMode $ \hout ->
+                          withFile (confOutProfiles conf) WriteMode $ \hprof ->
+                          withFile (confOutBed conf) WriteMode $ \hbed ->
+                          mapOverTranscripts (confBeds conf) $ \trx ->
+                          doTranscript conf asites bidx trx hout hprof hbed
 
 doTranscript :: Conf -> ASiteDelta -> BamIndex.IdxHandle -> Transcript -> Handle -> Handle -> Handle -> IO ()
 doTranscript conf asites bidx trx hout hprof hbed
@@ -171,7 +155,8 @@ utrFpCount :: U.Vector Int -> Pos.Offset -> Maybe Int
 utrFpCount prof cdsstart | cdsstart > 1 = Just $! sum [ prof U.! i | i <- [0..(fromIntegral cdsstart  - 2)] ]
                          | otherwise = Nothing
 
-data Conf = Conf { confOutput :: !(FilePath) 
+data Conf = Conf { confBamInput :: !FilePath
+                 , confOutput :: !FilePath
                  , confBeds :: ![FilePath]
                  , confASite :: !FilePath
                  , confFasta :: !FilePath
@@ -179,6 +164,17 @@ data Conf = Conf { confOutput :: !(FilePath)
                  , confMinRatio :: !Double
                  , confMinFrame :: !Double
                  } deriving (Show)
+
+argConf :: Term Conf
+argConf = Conf <$>
+          argBamInput <*>
+          argOutput <*>
+          argBeds <*>
+          argASite <*>
+          argFasta <*>
+          argMinCount <*>
+          argMinRatio <*>
+          argMinFrame
 
 confOutProfiles :: Conf -> FilePath
 confOutProfiles conf = let (base, ext) = splitExtension $ confOutput conf
@@ -188,70 +184,48 @@ confOutBed :: Conf -> FilePath
 confOutBed conf = let (base, ext) = splitExtension $ confOutput conf
                   in (base ++ "_uorfs") <.> "bed"
 
-data Arg = ArgOutput { unArgOutput :: !String }
-         | ArgBed { unArgBed :: !String }
-         | ArgASite { unArgASite :: !String }
-         | ArgFasta { unArgFasta :: !String }
-         | ArgMinRatio { unArgMinRatio :: !String }
-         | ArgMinCount { unArgMinCount :: !String }
-         | ArgMinFrame { unArgMinFrame :: !String }
-         deriving (Show, Read, Eq, Ord)
+argBamInput :: Term FilePath
+argBamInput = required $ pos 0 Nothing $ posInfo
+  { posName = "BAM", posDoc = "BAM format alignment file" }
 
-argOutput :: Arg -> Maybe String
-argOutput (ArgOutput del) = Just del
-argOutput _ = Nothing
+argOutput :: Term FilePath
+argOutput = required $ opt Nothing $ (optInfo ["o", "output"])
+  { optName = "OUTBASE", optDoc = "Base filename for output files" }
 
-argBed :: Arg -> Maybe String
-argBed (ArgBed bed) = Just bed
-argBed _ = Nothing
+argBeds :: Term [FilePath]
+argBeds = nonEmpty $ optAll [] $ (optInfo ["b", "bed"])
+  { optName = "BED", optDoc = "Bed filename" }
 
-argASite :: Arg -> Maybe String
-argASite (ArgASite aSite) = Just aSite
-argASite _ = Nothing
+argASite :: Term FilePath
+argASite = required $ opt Nothing $ (optInfo ["a", "asite"])
+  { optName = "ASITEFILE", optDoc = "A site offsets filename" }
 
-argFasta :: Arg -> Maybe String
-argFasta (ArgFasta fa) = Just fa
-argFasta _ = Nothing
+argFasta :: Term FilePath
+argFasta = required $ opt Nothing $ (optInfo ["f", "fasta"])
+  { optName = "FASTA", optDoc = "Indexed fasta file for sequence" }
 
-argMinCount :: Arg -> Maybe String
-argMinCount (ArgMinCount mc) = Just mc
-argMinCount _ = Nothing
+argMinCount :: Term Int
+argMinCount = required $ opt Nothing $ (optInfo ["c", "min-count"])
+  { optName = "MIN-COUNT", optDoc = "Minimum total count in -1 and +1 codons" }
 
-argMinRatio :: Arg -> Maybe String
-argMinRatio (ArgMinRatio mr) = Just mr
-argMinRatio _ = Nothing
+argMinRatio :: Term Double
+argMinRatio = required $ opt Nothing $ (optInfo ["r", "min-ratio"])
+  { optName = "MIN-RATIO", optDoc = "Minimum count ratio, +1 / -1 codons" }
 
-argMinFrame :: Arg -> Maybe String
-argMinFrame (ArgMinFrame mf) = Just mf
-argMinFrame _ = Nothing
+argMinFrame :: Term Double
+argMinFrame = required $ opt Nothing $ (optInfo ["z", "min-frame"])
+  { optName = "MIN-FRAME", optDoc = "Minimum sub-codon ratio, nt 0 / codon total (-1, 0, +1)" }
 
-optDescrs :: [OptDescr Arg]
-optDescrs = [ Option ['o'] ["output"]     (ReqArg ArgOutput "OUTFILE")   "Output filename"
-            , Option ['b'] ["bed"]        (ReqArg ArgBed "BED")          "Bed filename"
-            , Option ['a'] ["asite"]      (ReqArg ArgASite "ASITEFILE")  "A site offsets filename"
-            , Option ['f'] ["fasta"]      (ReqArg ArgFasta "FASTA")      "Indexed fasta file for sequence"
-            , Option ['c'] ["min-count"]  (ReqArg ArgMinCount "MIN")     "Minimum total count in -1 and +1 codons"
-            , Option ['r'] ["min-ratio"]  (ReqArg ArgMinRatio "MIN")     "Minimum count ratio, +1 / -1 codons"
-            , Option ['z'] ["min-frame"]  (ReqArg ArgMinFrame "MIN")      "Minimum sub-codon ratio, nt 0 / codon total (-1, 0, +1)"
-            ]
+--argDownstream :: Term Bool
+--argDownstream = value $ flag $ (optInfo ["d", "downstream"])
+--  { optDoc = "Search downstream (3' UTR) start sites" }
 
-argsToConf :: [Arg] -> Either String Conf
-argsToConf = runReaderT conf
-    where conf = Conf <$> 
-                 findOutput <*>
-                 findBeds <*>
-                 findASite <*>
-                 findFastaArg <*>
-                 findMinCount <*>
-                 findMinRatio <*>
-                 findMinFrame
-          findOutput = ReaderT $ maybe (Left "No out base") return  . listToMaybe . mapMaybe argOutput
-          findBeds = ReaderT $ return . mapMaybe argBed
-          findASite = ReaderT $ maybe (Left "No A sites") return . listToMaybe . mapMaybe argASite
-          findFastaArg = ReaderT $ maybe (Left "No sequence file") return . listToMaybe . mapMaybe argFasta
-          findMinCount = ReaderT $ maybe (Left "No min count") parseInt . listToMaybe . mapMaybe argMinCount
-          findMinRatio = ReaderT $ maybe (Left "No min ratio") parseDouble . listToMaybe . mapMaybe argMinRatio
-          findMinFrame = ReaderT $ maybe (Left "No min frame") parseDouble . listToMaybe . mapMaybe argMinFrame
-          parseInt = AP.parseOnly (AP.signed AP.decimal) . BS.pack
-          parseDouble = AP.parseOnly AP.double . BS.pack
-
+main :: IO ()
+main = run ( yassouruorf, info )
+  where yassouruorf = doYassourUorf <$> argConf
+        info = defTI { termName = "yassour-uorf"
+                     , version = "151002"
+                     , termDoc = "Identifies candidate start sites by the method of Yassour"
+                     , man = map P [ ""
+                                   ]
+                     }

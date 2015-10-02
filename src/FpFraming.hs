@@ -69,8 +69,8 @@ framingAux (Right (FpFraming start end frame gene))
 
 readAnnotMap :: Conf -> IO (SLM.SeqLocMap Transcript)
 readAnnotMap conf = do
-  trxsRaw <- concat <$> mapM readBedTranscripts (confBedFiles conf)
-  hPutStrLn stderr $! "Read " ++ show (length trxsRaw) ++ " annotations from " ++ show (confBedFiles conf)
+  trxsRaw <- readBedTranscripts (confBedFile conf)
+  hPutStrLn stderr $! "Read " ++ show (length trxsRaw) ++ " annotations from " ++ show (confBedFile conf)
   trxToGene <- mapM BS.readFile (confGeneFiles conf) >>=
                parseGeneMap . concat . map BS.lines
   hPutStrLn stderr $! "Read " ++ show (HM.size trxToGene) ++ " transcript-to-gene mappings from " ++ show (confGeneFiles conf)
@@ -173,7 +173,7 @@ unfields = intercalate "\t"
 
 data Conf = Conf { confBamInput :: !FilePath
                  , confOutput :: !(FilePath) 
-                 , confBedFiles :: ![FilePath]
+                 , confBedFile :: !FilePath
                  , confGeneFiles :: ![FilePath]
                  , confFlank :: !(Pos.Offset, Pos.Offset)
                  , confCdsBody :: !(Pos.Offset, Pos.Offset)
@@ -192,7 +192,7 @@ argConf :: Term Conf
 argConf = Conf <$>
           argBamInput <*>
           argOutput <*>
-          argBedFiles <*>
+          argBedFile <*>
           argGeneFiles <*>
           argFlank <*>
           argBody <*>
@@ -221,8 +221,8 @@ argOutput :: Term FilePath
 argOutput = required $ opt Nothing $ (optInfo ["o", "output"])
   { optName = "OUTBASE", optDoc = "Base filename for output files" }
 
-argBedFiles :: Term [FilePath]
-argBedFiles = nonEmpty $ optAll [] $ (optInfo ["b", "bed"])
+argBedFile :: Term FilePath
+argBedFile = required $ opt Nothing $ (optInfo ["b", "bed"])
   { optName = "BED", optDoc = "BED-format annotation filename" }
 
 argGeneFiles :: Term [FilePath]
