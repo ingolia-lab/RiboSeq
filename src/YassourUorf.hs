@@ -49,16 +49,27 @@ doTranscript conf asites bidx trx hout hprof hbed
           let writeStart = hPutStrLn hout . startLine conf trx prof sequ cdsloc
               writeStartProf = hPutStrLn hprof . startProf conf trx prof sequ cdsloc
               writeBed = BS.hPutStrLn hbed . Bed.transcriptToBedStd
-              starts = filter (profIsStart conf prof) $ candStartOffsets sequ cdsloc
+              starts = filter (profIsStart conf prof) $ candStartOffsets conf sequ cdsloc
           in do mapM_ writeStart starts
                 mapM_ writeStartProf starts
                 mapM_ writeBed $! mapMaybe (uorfTrx conf trx prof sequ cdsloc) starts
 
-candStartOffsets :: BS.ByteString -> Loc.ContigLoc -> [Pos.Offset]
-candStartOffsets sequ cdsloc = filter isCandAt [0..cdsStart]
+candStartOffsets :: Conf -> BS.ByteString -> Loc.ContigLoc -> [Pos.Offset]
+candStartOffsets conf sequ cdsloc = candUpstreamStartOffsets sequ cdsloc ++
+                                    (if (confDownstream conf) then candDownstreamStartOffsets sequ cdsloc else [])
+
+candUpstreamStartOffsets :: BS.ByteString -> Loc.ContigLoc -> [Pos.Offset]
+candUpstreamStartOffsets sequ cdsloc = filter isCandAt [0..cdsStart]
   where cdsStart = Loc.offset5 cdsloc
         isCandAt off = elem (BS.take 3 . BS.drop (fromIntegral off) $ sequ) candStarts
-        candStarts = [ "ATG", "CTG", "GTG", "TTG", "AAG", "ACG", "AGG", "ATA", "ATC", "ATT" ]                       
+        candStarts = [ "ATG", "CTG", "GTG", "TTG", "AAG", "ACG", "AGG", "ATA", "ATC", "ATT" ]
+
+candDownstreamStartOffsets :: BS.ByteString -> Loc.ContigLoc -> [Pos.Offset]
+candDownstreamStartOffsets sequ cdsloc = filter isCandAt [cdsEnd..trxEnd]
+  where cdsEnd = snd . Loc.bounds $ cdsloc
+        trxEnd = fromIntegral $ BS.length sequ
+        isCandAt off = elem (BS.take 3 . BS.drop (fromIntegral off) $ sequ) candStarts
+        candStarts = [ "ATG", "CTG", "GTG", "TTG", "AAG", "ACG", "AGG", "ATA", "ATC", "ATT" ]
         
 profFrame :: U.Vector Int -> Pos.Offset -> Maybe Double
 profFrame cts ntoff
@@ -96,6 +107,7 @@ startLine conf trx prof sequ cdsloc ntoff = intercalate "\t" fields
                  , startRatio
                  , frameRatio
                  , show . Pos.unOff $ ntoff - Loc.offset5 cdsloc
+                 , show . Pos.unOff $ ntoff - ((snd . Loc.bounds $ cdsloc) + 1)
                  , ntlen
                  , uorfCount
                  , utrCount
@@ -163,6 +175,7 @@ data Conf = Conf { confBamInput :: !FilePath
                  , confMinCount :: !Int
                  , confMinRatio :: !Double
                  , confMinFrame :: !Double
+                 , confDownstream :: !Bool
                  } deriving (Show)
 
 argConf :: Term Conf
@@ -174,7 +187,8 @@ argConf = Conf <$>
           argFasta <*>
           argMinCount <*>
           argMinRatio <*>
-          argMinFrame
+          argMinFrame <*>
+          argDownstream
 
 confOutProfiles :: Conf -> FilePath
 confOutProfiles conf = let (base, ext) = splitExtension $ confOutput conf
@@ -216,9 +230,9 @@ argMinFrame :: Term Double
 argMinFrame = required $ opt Nothing $ (optInfo ["z", "min-frame"])
   { optName = "MIN-FRAME", optDoc = "Minimum sub-codon ratio, nt 0 / codon total (-1, 0, +1)" }
 
---argDownstream :: Term Bool
---argDownstream = value $ flag $ (optInfo ["d", "downstream"])
---  { optDoc = "Search downstream (3' UTR) start sites" }
+argDownstream :: Term Bool
+argDownstream = value $ flag $ (optInfo ["d", "downstream"])
+  { optDoc = "Search downstream (3' UTR) start sites" }
 
 main :: IO ()
 main = run ( yassouruorf, info )
