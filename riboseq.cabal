@@ -23,6 +23,16 @@ Library
   GHC-Options:         -auto-all -Wall
   Default-Language:    Haskell2010
 
+Executable index-utils
+  Main-is:             IndexUtils.hs
+  Other-modules:       
+  Build-depends:       base >= 4.2 && < 5, bytestring,
+                       attoparsec >= 0.8.5, hashable, unordered-containers, directory,
+                       iteratee >= 0.8.1, seqloc, biocore >= 0.2, transformers,
+                       conduit, conduit-extra, vector, filepath, resourcet, cmdtheline
+  Hs-Source-Dirs:      src
+  Ghc-Options:         -auto-all -O2 -Wall
+
 Executable bam-suppress-duplicates
   Main-is:             BamSuppressDuplicates.hs
   Build-depends:       base, bytestring, cmdtheline, 
