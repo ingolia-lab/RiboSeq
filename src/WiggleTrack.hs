@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE BangPatterns #-}
 
 module Main
        where 
@@ -18,6 +19,7 @@ import System.IO
 
 import qualified Data.Attoparsec.Char8 as AP
 import qualified Data.Iteratee as Iter
+import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Unboxed.Mutable as UM
 
 import qualified Bio.SamTools.Bam as Bam
@@ -67,11 +69,15 @@ writeChrSizes tseqs outname = withFile outname WriteMode $ \hout ->
   in mapM_ writeChrSizeLine tseqs
 
 data Count = Count { ctName :: !BS.ByteString, ctFwd :: !(UM.IOVector Int), ctRev:: !(UM.IOVector Int) }
+
 data CountWindow = CountWindow { cwFwd :: !(UM.IOVector Int)
                                , cwRev :: !(UM.IOVector Int)
                                }
 cwLength :: CountWindow -> Int
 cwLength = UM.length . cwFwd
+
+cwNew :: Int -> IO CountWindow
+cwNew winlen = CountWindow <$> UM.replicate winlen 0 <*> UM.replicate winlen 0
 
 cwCountOne :: CountWindow -> Int -> Strand -> IO ()
 cwCountOne (CountWindow ctfwd ctrev) off strand = incr ctstrand off
@@ -79,6 +85,10 @@ cwCountOne (CountWindow ctfwd ctrev) off strand = incr ctstrand off
           Plus -> ctfwd
           Minus -> ctrev
         incr v i = UM.read v i >>= UM.write v i . (succ $!)
+
+data WindowCounts = WindowCounts { wcFwd, wcRev :: !(U.Vector Int)
+                                 , wcOffset :: !Pos.Offset
+                                 }
 
 data CountWindowSet = CountWindowSet { cwsBefore, cwsWindow, cwsAfter :: !CountWindow
                                      , cwsOffset :: !Pos.Offset
@@ -92,6 +102,22 @@ cwsCountOne (CountWindowSet before curr after winoff) (Pos.Pos off strand)
     | x < cwLength curr -> cwCountOne curr x strand
     | x < (cwLength curr + cwLength after) -> cwCountOne after (x - cwLength curr) strand
     | otherwise -> hPutStrLn stderr "cwsCountOne: skipping after"
+
+cwsNew :: Int -> IO CountWindowSet
+cwsNew winlen = CountWindowSet <$>
+                cwNew winlen <*>
+                cwNew winlen <*>
+                cwNew winlen <*>
+                pure 0
+
+cwsAdvance :: CountWindowSet -> IO (CountWindowSet, WindowCounts)
+cwsAdvance (CountWindowSet before@(CountWindow beforeFwd beforeRev) curr after winoff) = do
+  prevFwd <- U.freeze beforeFwd
+  prevRev <- U.freeze beforeRev
+  let !prev = WindowCounts prevFwd prevRev (winoff - fromIntegral (cwLength before))
+  next <- cwNew (cwLength curr)
+  let !advanced = CountWindowSet curr after next (winoff + fromIntegral (cwLength curr))
+  return (advanced, prev)
 
 ctLength :: Count -> Int
 ctLength = UM.length . ctFwd             
