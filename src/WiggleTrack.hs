@@ -1,5 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE BangPatterns #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 
 module Main
        where 
@@ -8,6 +9,7 @@ import Control.Applicative
 import Control.Exception
 import Control.Monad.Reader
 import qualified Data.ByteString.Char8 as BS
+import Data.Int
 import Data.List
 import Data.Maybe
 import Data.Ord
@@ -155,6 +157,13 @@ countBam conf bidx ct = do
           return $ maybe (return ()) (countPos ct) . (Bam.refSpLoc >=> aSitePos asites)
         countCoverage = maybe (return ()) countAll . Bam.refSpLoc
         countAll = mapM_ (countPos ct) . Loc.allPos
+
+hPutWiggleWindow :: Handle -> Conf -> U.Vector Int -> Pos.Offset -> IO ()
+hPutWiggleWindow h conf ctvec off = U.imapM_ putDatum ctvec
+  where putDatum i ct = case (fromIntegral off) + (fromIntegral i) of
+          (x :: Int64) | x >= 0 && ct > 0 -> let qct = confQNorm conf * fromIntegral ct
+                                             in hPutStrLn h $ shows (x + 1) . (' ' :) . showFFloat (Just 2) qct $ ""
+                       | otherwise -> return ()
 
 hPutWiggleChr :: Handle -> Conf -> BS.ByteString -> UM.IOVector Int -> IO ()
 hPutWiggleChr h conf name ctvec = putHeader >> putData

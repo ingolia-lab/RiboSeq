@@ -81,7 +81,7 @@ Executable wiggle-track
   Main-Is:             WiggleTrack.hs
   Other-Modules:       Bio.RiboSeq.CodonAssignment, Bio.RiboSeq.BamFile
   Build-depends:       base, bytestring, attoparsec >= 0.8.5, iteratee, filepath,
-                       transformers, monads-tf, vector, unordered-containers,
+                       transformers, monads-tf, vector >= 0.11, unordered-containers,
                        seqloc >= 0.5.1, seqloc-datafiles, samtools >= 0.1.2, samtools-iteratee
   Hs-Source-Dirs:      src
   Ghc-options:         -auto-all -Wall
