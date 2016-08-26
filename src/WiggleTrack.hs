@@ -67,7 +67,32 @@ writeChrSizes tseqs outname = withFile outname WriteMode $ \hout ->
   in mapM_ writeChrSizeLine tseqs
 
 data Count = Count { ctName :: !BS.ByteString, ctFwd :: !(UM.IOVector Int), ctRev:: !(UM.IOVector Int) }
-    
+data CountWindow = CountWindow { cwFwd :: !(UM.IOVector Int)
+                               , cwRev :: !(UM.IOVector Int)
+                               }
+cwLength :: CountWindow -> Int
+cwLength = UM.length . cwFwd
+
+cwCountOne :: CountWindow -> Int -> Strand -> IO ()
+cwCountOne (CountWindow ctfwd ctrev) off strand = incr ctstrand off
+  where ctstrand = case strand of 
+          Plus -> ctfwd
+          Minus -> ctrev
+        incr v i = UM.read v i >>= UM.write v i . (succ $!)
+
+data CountWindowSet = CountWindowSet { cwsBefore, cwsWindow, cwsAfter :: !CountWindow
+                                     , cwsOffset :: !Pos.Offset
+                                     }
+
+cwsCountOne :: CountWindowSet -> Pos.Pos -> IO ()
+cwsCountOne (CountWindowSet before curr after winoff) (Pos.Pos off strand)
+  = case fromIntegral $ off - winoff of
+  x | x < negate (cwLength before) -> hPutStrLn stderr "cwsCountOne: skipping before"
+    | x < 0 -> cwCountOne before (x + cwLength before) strand
+    | x < cwLength curr -> cwCountOne curr x strand
+    | x < (cwLength curr + cwLength after) -> cwCountOne after (x - cwLength curr) strand
+    | otherwise -> hPutStrLn stderr "cwsCountOne: skipping after"
+
 ctLength :: Count -> Int
 ctLength = UM.length . ctFwd             
 
