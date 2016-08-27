@@ -20,13 +20,13 @@ import System.FilePath
 import System.IO
 
 import qualified Data.Attoparsec.Char8 as AP
-import qualified Data.Iteratee as Iter
+import qualified Data.Conduit as C
+import qualified Data.Conduit.List as C
 import qualified Data.Vector.Unboxed as U
 import qualified Data.Vector.Unboxed.Mutable as UM
 
 import qualified Bio.SamTools.Bam as Bam
-import qualified Bio.SamTools.BamIndex as BamIndex
-import qualified Bio.SamTools.Iteratee as BamIter
+import qualified Bio.SamTools.Conduit as Bam
 import qualified Bio.SeqLoc.Location as Loc
 import qualified Bio.SeqLoc.Position as Pos
 import Bio.SeqLoc.Strand
@@ -50,17 +50,10 @@ doWiggleTrack bam conf = do
   maybe (return ()) (writeChrSizes tseqs) $ confChrSizes conf
   withFile (confOutputPlus conf) WriteMode $ \hfwd ->
     withFile (confOutputRev conf) WriteMode $ \hrev ->
-    forM_ (sortBy (comparing Bam.len) tseqs) $ \tseq -> do
-      ct@(Count name ctfwd ctrev) <- targetSeqCounts conf tseq
-      bracket (BamIndex.open bam) BamIndex.close $ \bidx -> do
-        verbose conf $ unwords [ "    counting ", show bam ]
-        countBam conf bidx ct
-        verbose conf $ unwords [ "    done counting ", show bam ]
-      verbose conf $ unwords ["  writing ", show $ confOutputPlus conf ]
-      hPutWiggleChr hfwd conf name ctfwd
-      verbose conf $ unwords ["  writing ", show $ confOutputRev conf ]      
-      hPutWiggleChr hrev conf name ctrev
-      verbose conf $ unwords ["  done writing ", show $ Bam.name tseq ]
+    bracket (Bam.openBamInFile bam) Bam.closeInHandle $ \bin -> do
+      aSiteDelta <- readASiteDelta $ confASite conf
+      let asite = Bam.refSpLoc >=> aSitePos aSiteDelta
+      countBam conf bin (hfwd, hrev) asite
                        
 writeChrSizes :: [Bam.HeaderSeq] -> FilePath -> IO ()
 writeChrSizes tseqs outname = withFile outname WriteMode $ \hout ->
@@ -69,8 +62,6 @@ writeChrSizes tseqs outname = withFile outname WriteMode $ \hout ->
                                                       , show . Bam.len $ hseq
                                                       ]
   in mapM_ writeChrSizeLine tseqs
-
-data Count = Count { ctName :: !BS.ByteString, ctFwd :: !(UM.IOVector Int), ctRev:: !(UM.IOVector Int) }
 
 data CountWindow = CountWindow { cwFwd :: !(UM.IOVector Int)
                                , cwRev :: !(UM.IOVector Int)
@@ -92,71 +83,82 @@ data WindowCounts = WindowCounts { wcFwd, wcRev :: !(U.Vector Int)
                                  , wcOffset :: !Pos.Offset
                                  }
 
-data CountWindowSet = CountWindowSet { cwsBefore, cwsWindow, cwsAfter :: !CountWindow
+data CountWindowSet = CountWindowSet { cwsBefore, cwsCurr :: !CountWindow
                                      , cwsOffset :: !Pos.Offset
                                      }
 
 cwsCountOne :: CountWindowSet -> Pos.Pos -> IO ()
-cwsCountOne (CountWindowSet before curr after winoff) (Pos.Pos off strand)
+cwsCountOne (CountWindowSet before curr winoff) (Pos.Pos off strand)
   = case fromIntegral $ off - winoff of
   x | x < negate (cwLength before) -> hPutStrLn stderr "cwsCountOne: skipping before"
     | x < 0 -> cwCountOne before (x + cwLength before) strand
     | x < cwLength curr -> cwCountOne curr x strand
-    | x < (cwLength curr + cwLength after) -> cwCountOne after (x - cwLength curr) strand
     | otherwise -> hPutStrLn stderr "cwsCountOne: skipping after"
 
-cwsNew :: Int -> IO CountWindowSet
-cwsNew winlen = CountWindowSet <$>
-                cwNew winlen <*>
-                cwNew winlen <*>
-                cwNew winlen <*>
-                pure 0
+cwsNew :: Int -> Pos.Offset -> IO CountWindowSet
+cwsNew winlen off0 = CountWindowSet <$>
+                     cwNew winlen <*>
+                     cwNew winlen <*>
+                     pure off0
+
+cwsBounds :: CountWindowSet -> (Pos.Offset, Pos.Offset, Pos.Offset)
+cwsBounds (CountWindowSet before curr winoff)
+  = let !start = (fromIntegral winoff) - (fromIntegral $ cwLength before)
+        !end = start + fromIntegral (cwLength curr) - 1
+        !next = start + (2 * fromIntegral (cwLength curr)) - 1
+    in (start, end, next)
 
 cwsAdvance :: CountWindowSet -> IO (CountWindowSet, WindowCounts)
-cwsAdvance (CountWindowSet before@(CountWindow beforeFwd beforeRev) curr after winoff) = do
+cwsAdvance (CountWindowSet before@(CountWindow beforeFwd beforeRev) curr winoff) = do
   prevFwd <- U.freeze beforeFwd
   prevRev <- U.freeze beforeRev
   let !prev = WindowCounts prevFwd prevRev (winoff - fromIntegral (cwLength before))
   next <- cwNew (cwLength curr)
-  let !advanced = CountWindowSet curr after next (winoff + fromIntegral (cwLength curr))
+  let !advanced = CountWindowSet curr next (winoff + fromIntegral (cwLength curr))
   return (advanced, prev)
 
-ctLength :: Count -> Int
-ctLength = UM.length . ctFwd             
+cwsFinish :: CountWindowSet -> IO WindowCounts
+cwsFinish (CountWindowSet before@(CountWindow beforeFwd beforeRev) (CountWindow currFwd currRev) winoff) = do
+  fstFwd <- U.freeze beforeFwd
+  sndFwd <- U.freeze currFwd
+  fstRev <- U.freeze beforeRev
+  sndRev <- U.freeze currRev
+  return $! WindowCounts (fstFwd U.++ sndFwd) (fstRev U.++ sndRev) (winoff - fromIntegral (cwLength before))
 
-countPos :: Count -> Pos.Pos -> IO ()
-countPos (Count _name ctfwd ctrev) (Pos.Pos off strand) = incr ctstrand $ fromIntegral off
-  where ctstrand = case strand of 
-          Plus -> ctfwd
-          Minus -> ctrev
-        incr v i = UM.read v i >>= UM.write v i . (succ $!)
+countBam :: Conf -> Bam.InHandle -> (Handle, Handle) -> (Bam.Bam1 -> Maybe Pos.Pos) -> IO ()
+countBam conf bin hs asite = do cws0 <- cwsNew (confWindowSize conf) 0
+                                (cws', _) <- Bam.sourceHandle bin C.$$ C.foldM countOne (cws0, -1)
+                                cwsFinish cws' >>= wcPutWiggle hs conf
+  where countOne (cws, tidx0) b = case Bam.targetID b of
+          Nothing -> return (cws, tidx0)
+          (Just tidx) | tidx < tidx0 -> error "countTarget: Decreasing target index, BAM unsorted?"
+                      | tidx == tidx0 -> let (start, end, next) = cwsBounds cws
+                                         in case asite b of
+                                           Nothing -> return (cws, tidx0)
+                                           (Just p) | Pos.offset p < start -> error "countTarget: Decreasing position, BAM unsorted?"
+                                                    | Pos.offset p < end -> do cwsCountOne cws p
+                                                                               return (cws, tidx)
+                                                    | Pos.offset p < next -> do (cws', wc) <- cwsAdvance cws
+                                                                                wcPutWiggle hs conf wc
+                                                                                cwsCountOne cws' p
+                                                                                return (cws', tidx)
+                                                    | otherwise -> do cwsFinish cws >>= wcPutWiggle hs conf
+                                                                      cws' <- cwsNew (confWindowSize conf) (Pos.offset p)
+                                                                      cwsCountOne cws' p
+                                                                      return (cws', tidx)
+                      | otherwise -> do cwsFinish cws >>= wcPutWiggle hs conf
+                                        let !newchr = Bam.targetSeqName (Bam.inHeader bin) tidx
+                                        forM_ [fst hs, snd hs] $ \h -> hPutWiggleChrom h newchr
+                                        cws' <- cwsNew (confWindowSize conf) (maybe 0 fromIntegral $ Bam.position b)
+                                        countOne (cws', tidx) b -- N.B. re-enter with new target index
 
-targetSeqCounts :: Conf -> Bam.HeaderSeq -> IO Count
-targetSeqCounts conf hseq = do verbose conf $ "Preparing to initialize count vectors"
-                               verbose conf . unwords $ [ "  forward", BS.unpack $ Bam.name hseq
-                                                        , show (Bam.len hseq), "positions"
-                                                        ]
-                               ctfwd <- newCountVector (Bam.len hseq)
-                               verbose conf . unwords $ [ "  reverse", BS.unpack $ Bam.name hseq
-                                                        , show (Bam.len hseq), "positions"
-                                                        ]
-                               ctrev <- newCountVector (Bam.len hseq)
-                               verbose conf . unwords $ [ "Initialized", BS.unpack $ Bam.name hseq
-                                                        , show (Bam.len hseq), "positions"
-                                                        ]
-                               return $! Count (Bam.name hseq) ctfwd ctrev
-  where newCountVector len = UM.replicate (fromIntegral len) 0
+hPutWiggleChrom :: Handle -> BS.ByteString -> IO ()
+hPutWiggleChrom h name = hPutStrLn h . unwords $ [ "variableStep", "chrom=" ++ BS.unpack name, "span=1" ]
 
-countBam :: Conf -> BamIndex.IdxHandle -> Count -> IO ()
-countBam conf bidx ct = do
-  let noTarget = "Could not find target " ++ show (ctName ct)
-  tidx <- maybe (error noTarget) return $! Bam.lookupTarget (BamIndex.idxHeader bidx) (ctName ct) 
-  docount <- maybe (return countCoverage) countASite $ confASite conf
-  BamIter.enumIndexRegion bidx tidx (0, fromIntegral $ ctLength ct - 1) (Iter.mapM_ docount) >>= Iter.run
-  where countASite asitefile = readASiteDelta asitefile >>= \asites ->
-          return $ maybe (return ()) (countPos ct) . (Bam.refSpLoc >=> aSitePos asites)
-        countCoverage = maybe (return ()) countAll . Bam.refSpLoc
-        countAll = mapM_ (countPos ct) . Loc.allPos
+wcPutWiggle :: (Handle, Handle) -> Conf -> WindowCounts -> IO ()
+wcPutWiggle (hfwd, hrev) conf (WindowCounts fwd rev off) = do
+  hPutWiggleWindow hfwd conf fwd off
+  hPutWiggleWindow hrev conf rev off
 
 hPutWiggleWindow :: Handle -> Conf -> U.Vector Int -> Pos.Offset -> IO ()
 hPutWiggleWindow h conf ctvec off = U.imapM_ putDatum ctvec
@@ -165,18 +167,11 @@ hPutWiggleWindow h conf ctvec off = U.imapM_ putDatum ctvec
                                              in hPutStrLn h $ shows (x + 1) . (' ' :) . showFFloat (Just 2) qct $ ""
                        | otherwise -> return ()
 
-hPutWiggleChr :: Handle -> Conf -> BS.ByteString -> UM.IOVector Int -> IO ()
-hPutWiggleChr h conf name ctvec = putHeader >> putData
-  where putHeader = hPutStrLn h . unwords $ [ "variableStep", "chrom=" ++ BS.unpack name, "span=1" ]
-        putData = forM_ [0..(UM.length ctvec - 1)] $ \idx -> 
-          do ct <- UM.read ctvec idx
-             let qct = confQNorm conf * fromIntegral ct
-             when (ct > 0) $ hPutStrLn h $ shows (idx + 1) . (' ' :) . showFFloat (Just 2) qct $ ""
-
 data Conf = Conf { confOutput :: !(FilePath) 
-                 , confASite :: !(Maybe FilePath)
+                 , confASite :: !FilePath
                  , confQNorm :: !Double
                  , confChrSizes :: !(Maybe FilePath)
+                 , confWindowSize :: !Int
                  } deriving (Show)
 
 confOutputPlus :: Conf -> FilePath
@@ -193,7 +188,6 @@ verbose _conf message = hPutStrLn stderr message
 data Arg = ArgOutput { unArgOutput :: !String }
          | ArgASite { unArgASite :: !String }
          | ArgQNorm { unArgQNorm :: !String }
-         | ArgCoverage
          | ArgChrSizes { unArgChrSizes :: !String }
          deriving (Show, Read, Eq, Ord)
 
@@ -216,7 +210,6 @@ argChrSizes _ = Nothing
 optDescrs :: [OptDescr Arg]
 optDescrs = [ Option ['o'] ["output"]     (ReqArg ArgOutput "OUTFILE")    "Output filename"
             , Option ['a'] ["asite"]      (ReqArg ArgASite "ASITEFILE")   "A site offsets filename"
-            , Option ['c'] ["coverage"]   (NoArg ArgCoverage)             "Total read coverage"
             , Option ['q'] ["qnorm"]      (ReqArg ArgQNorm "QNORM")       "Multiplicative scaling factor"
             , Option ['x'] ["chrsizes"]   (ReqArg ArgChrSizes "SIZEFILE") "Chromosome size output file"
             ]
@@ -227,13 +220,11 @@ argsToConf = runReaderT conf
                  findOutput <*>
                  findASite <*>
                  findQNorm <*>
-                 findChrSizes
+                 findChrSizes <*>
+                 pure defaultWindowSize
           findOutput = ReaderT $ maybe (Left "No out base") return  . listToMaybe . mapMaybe argOutput
-          findASite = ReaderT $ \args ->
-            let masites = listToMaybe . mapMaybe argASite $ args
-            in if ArgCoverage `elem` args
-               then maybe (return Nothing) (const $ Left "Cannot combine A sites and coverage") masites
-               else maybe (Left "No A sites specified (and not coverage mode)") (return . Just) masites
+          findASite = ReaderT $ maybe (Left "No A sites") return . listToMaybe . mapMaybe argASite
           findQNorm = ReaderT $ maybe (return 1.0) parseDouble . listToMaybe . mapMaybe argQNorm
             where parseDouble = AP.parseOnly AP.double . BS.pack
           findChrSizes = ReaderT $ return . listToMaybe . mapMaybe argChrSizes
+          defaultWindowSize = 1024
