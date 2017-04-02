@@ -131,26 +131,29 @@ countBam conf bin hs asite = do cws0 <- cwsNew (confWindowSize conf) 0
                                 cwsFinish cws' >>= wcPutWiggle hs conf
   where countOne (cws, tidx0) b = case Bam.targetID b of
           Nothing -> return (cws, tidx0)
-          (Just tidx) | tidx < tidx0 -> error "countTarget: Decreasing target index, BAM unsorted?"
-                      | tidx == tidx0 -> let (start, end, next) = cwsBounds cws
-                                         in case asite b of
-                                           Nothing -> return (cws, tidx0)
-                                           (Just p) | Pos.offset p < start -> error "countTarget: Decreasing position, BAM unsorted?"
-                                                    | Pos.offset p < end -> do cwsCountOne cws p
-                                                                               return (cws, tidx)
-                                                    | Pos.offset p < next -> do (cws', wc) <- cwsAdvance cws
-                                                                                wcPutWiggle hs conf wc
-                                                                                cwsCountOne cws' p
-                                                                                return (cws', tidx)
-                                                    | otherwise -> do cwsFinish cws >>= wcPutWiggle hs conf
-                                                                      cws' <- cwsNew (confWindowSize conf) (Pos.offset p)
-                                                                      cwsCountOne cws' p
-                                                                      return (cws', tidx)
-                      | otherwise -> do cwsFinish cws >>= wcPutWiggle hs conf
-                                        let !newchr = Bam.targetSeqName (Bam.inHeader bin) tidx
-                                        forM_ [fst hs, snd hs] $ \h -> hPutWiggleChrom h newchr
-                                        cws' <- cwsNew (confWindowSize conf) (maybe 0 fromIntegral $ Bam.position b)
-                                        countOne (cws', tidx) b -- N.B. re-enter with new target index
+          (Just tidx)
+            | tidx < tidx0 -> error $ "countTarget: Decreasing target index, BAM unsorted?" ++ show (tidx, tidx0)
+            | tidx == tidx0 -> let (start, end, next) = cwsBounds cws
+                               in case asite b of
+                                 Nothing -> return (cws, tidx0)
+                                 (Just p)
+                                   | Pos.offset p < start -> do hPutStrLn stderr $ "Dropped read, splice > " ++ show (confWindowSize conf)
+                                                                return (cws, tidx)
+                                   | Pos.offset p < end -> do cwsCountOne cws p
+                                                              return (cws, tidx)
+                                   | Pos.offset p < next -> do (cws', wc) <- cwsAdvance cws
+                                                               wcPutWiggle hs conf wc
+                                                               cwsCountOne cws' p
+                                                               return (cws', tidx)
+                                   | otherwise -> do cwsFinish cws >>= wcPutWiggle hs conf
+                                                     cws' <- cwsNew (confWindowSize conf) (Pos.offset p)
+                                                     cwsCountOne cws' p
+                                                     return (cws', tidx)
+            | otherwise -> do cwsFinish cws >>= wcPutWiggle hs conf
+                              let !newchr = Bam.targetSeqName (Bam.inHeader bin) tidx
+                              forM_ [fst hs, snd hs] $ \h -> hPutWiggleChrom h newchr
+                              cws' <- cwsNew (confWindowSize conf) (maybe 0 fromIntegral $ Bam.position b)
+                              countOne (cws', tidx) b -- N.B. re-enter with new target index
 
 hPutWiggleChrom :: Handle -> BS.ByteString -> IO ()
 hPutWiggleChrom h name = hPutStrLn h . unwords $ [ "variableStep", "chrom=" ++ BS.unpack name, "span=1" ]
@@ -227,4 +230,4 @@ argsToConf = runReaderT conf
           findQNorm = ReaderT $ maybe (return 1.0) parseDouble . listToMaybe . mapMaybe argQNorm
             where parseDouble = AP.parseOnly AP.double . BS.pack
           findChrSizes = ReaderT $ return . listToMaybe . mapMaybe argChrSizes
-          defaultWindowSize = 1024
+          defaultWindowSize = 4194304

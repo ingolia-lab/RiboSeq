@@ -136,8 +136,11 @@ data Selection = Selection { sDist :: HM.HashMap (BS.ByteString, BS.ByteString) 
                            }
 
 selectify :: SelConf -> [(BS.ByteString, BS.ByteString)] -> [(BS.ByteString, BS.ByteString)] -> Selection
-selectify conf idxs exts = iterate $ newSelection conf idxs exts
+selectify conf idxs exts = iterate $ pickExtant $ newSelection conf idxs exts
   where iterate sel0 = maybe sel0 (iterate . selectIndex conf sel0) $ nextSelection conf sel0
+        pickExtant sel0 = go sel0 $ map fst exts
+          where go s [] = s
+                go s (k:krest) = go (selectIndex conf s k) krest
 
 newSelection :: SelConf -> [(BS.ByteString, BS.ByteString)] -> [(BS.ByteString, BS.ByteString)] -> Selection
 newSelection conf idxs exts = Selection { sDist = dists, sSeqs = seqs, sPicked = [], sActive = HS.fromList $ map fst allIndexes }
